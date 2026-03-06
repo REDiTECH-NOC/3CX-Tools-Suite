@@ -182,7 +182,7 @@ export async function deploy3cxTools(payload: TaskPayload): Promise<void> {
       args.push(`--autopager-key '${payload.autoPagerApiKey}'`);
     }
 
-    const installCmd = `curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/install.sh | bash -s -- ${args.join(" ")}`;
+    const installCmd = `curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/3cxtools-relay/install.sh | bash -s -- ${args.join(" ")}`;
 
     log.info(`Running install script on ${label}...`);
     const result = await ssh.execCommand(installCmd, { execOptions: { pty: true } });
@@ -197,12 +197,12 @@ export async function deploy3cxTools(payload: TaskPayload): Promise<void> {
     }
 
     // Verify the service is running
-    const check = await ssh.execCommand("systemctl is-active 3cx-relay");
+    const check = await ssh.execCommand("systemctl is-active 3cxtools-relay");
     if (!check.stdout.trim().includes("active")) {
-      throw new Error(`3cx-relay service is not active after install. Status: ${check.stdout.trim()}`);
+      throw new Error(`3cxtools-relay service is not active after install. Status: ${check.stdout.trim()}`);
     }
 
-    log.info(`3CX Tools relay agent deployed to ${label}`);
+    log.info(`3CXTools-Relay deployed to ${label}`);
   } finally {
     ssh.dispose();
   }
@@ -237,7 +237,7 @@ export async function remove3cxTools(payload: TaskPayload): Promise<void> {
   });
 
   try {
-    const uninstallCmd = `curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/uninstall.sh | bash -s -- --yes`;
+    const uninstallCmd = `curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/3cxtools-relay/uninstall.sh | bash -s -- --yes`;
 
     log.info(`Running uninstall script on ${label}...`);
     const result = await ssh.execCommand(uninstallCmd, { execOptions: { pty: true } });
@@ -252,12 +252,12 @@ export async function remove3cxTools(payload: TaskPayload): Promise<void> {
     }
 
     // Verify the service is gone
-    const check = await ssh.execCommand("systemctl is-active 3cx-relay 2>/dev/null || echo inactive");
+    const check = await ssh.execCommand("systemctl is-active 3cxtools-relay 2>/dev/null || echo inactive");
     if (check.stdout.trim() === "active") {
-      throw new Error("3cx-relay service is still active after uninstall");
+      throw new Error("3cxtools-relay service is still active after uninstall");
     }
 
-    log.info(`3CX Tools relay agent removed from ${label}`);
+    log.info(`3CXTools-Relay removed from ${label}`);
   } finally {
     ssh.dispose();
   }

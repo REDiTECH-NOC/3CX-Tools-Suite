@@ -29,12 +29,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // ── 2. Find relay agent files ──
-  // In production Docker container, relay agent files are at /app/relay-agent/
-  // In development, they're at ../relay-agent/ relative to app root
+  // In production Docker container, relay agent files are at /app/3cxtools-relay/
+  // In development, they're at ../3cxtools-relay/ relative to app root
   const possiblePaths = [
-    '/app/relay-agent',                                    // Docker container
-    path.join(process.cwd(), '..', 'relay-agent'),         // Dev (monorepo sibling)
-    path.join(process.cwd(), 'relay-agent'),               // Dev (nested)
+    '/app/3cxtools-relay',                                    // Docker container
+    path.join(process.cwd(), '..', '3cxtools-relay'),         // Dev (monorepo sibling)
+    path.join(process.cwd(), '3cxtools-relay'),               // Dev (nested)
   ];
 
   let agentDir: string | null = null;
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const f of fs.readdirSync(distDir)) {
     if (f.endsWith('.js')) {
       filesToInclude.push({
-        relativePath: `3cx-relay/dist/${f}`,
+        relativePath: `3cxtools-relay/dist/${f}`,
         absolutePath: path.join(distDir, f),
       });
     }
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // Add package.json
   filesToInclude.push({
-    relativePath: '3cx-relay/package.json',
+    relativePath: '3cxtools-relay/package.json',
     absolutePath: path.join(agentDir, 'package.json'),
   });
 
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const scriptPath = path.join(agentDir, script);
     if (fs.existsSync(scriptPath)) {
       filesToInclude.push({
-        relativePath: `3cx-relay/${script}`,
+        relativePath: `3cxtools-relay/${script}`,
         absolutePath: scriptPath,
       });
     }
@@ -113,7 +113,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     status: 200,
     headers: {
       'Content-Type': 'application/gzip',
-      'Content-Disposition': 'attachment; filename="3cx-relay-agent.tar.gz"',
+      'Content-Disposition': 'attachment; filename="3cx-3cxtools-relay.tar.gz"',
       'Content-Length': String(gzipped.length),
     },
   });

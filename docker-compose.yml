@@ -5,8 +5,8 @@
 #   docker compose up -d auto-pager          # Auto-Pager only
 #   docker compose up -d                     # Everything
 #
-# The relay-agent runs directly on the PBX (not in Docker).
-# See relay-agent/install.sh for installation.
+# The 3cxtools-relay runs directly on the PBX (not in Docker).
+# See 3cxtools-relay/install.sh for installation.
 
 services:
   # ── Wallboard (Next.js + PostgreSQL) ─────────────────────────

@@ -1,14 +1,14 @@
 #!/bin/bash
 set -e
 
-# ─── 3CX Relay Agent Installer ───────────────────────────────────
+# ─── 3CXTools-Relay Installer ────────────────────────────────────
 #
 # Download and run (interactive):
-#   curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/install.sh -o /tmp/install-relay.sh && sudo bash /tmp/install-relay.sh
+#   curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/3cxtools-relay/install.sh -o /tmp/install-3cxtools-relay.sh && sudo bash /tmp/install-3cxtools-relay.sh
 #
 # Or with arguments (non-interactive / piped):
 #   curl -sSL .../install.sh | sudo bash -s -- --wallboard-url https://wallboard:4200 --api-key KEY \
-#     --pbx-url https://localhost:5001 --pbx-ext 1000 --pbx-pass secret
+#     --pbx-ext 1000 --pbx-pass secret
 #
 # ──────────────────────────────────────────────────────────────────
 
@@ -18,17 +18,17 @@ if [[ ! -t 0 ]] && [[ $# -eq 0 ]]; then
   echo "ERROR: Interactive mode requires a terminal."
   echo ""
   echo "Download the script first, then run it:"
-  echo "  curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/install.sh -o /tmp/install-relay.sh"
-  echo "  sudo bash /tmp/install-relay.sh"
+  echo "  curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/3cxtools-relay/install.sh -o /tmp/install-3cxtools-relay.sh"
+  echo "  sudo bash /tmp/install-3cxtools-relay.sh"
   echo ""
   echo "Or use non-interactive mode with arguments (run with --help for usage)."
   exit 1
 fi
 
-INSTALL_DIR="/opt/3cx-relay"
-CONFIG_DIR="/etc/3cx-relay"
-SERVICE_NAME="3cx-relay"
-REQUIRED_NODE_MAJOR=18
+INSTALL_DIR="/opt/3cxtools-relay"
+CONFIG_DIR="/etc/3cxtools-relay"
+SERVICE_NAME="3cxtools-relay"
+REQUIRED_NODE_MAJOR=20
 REPO_URL="https://github.com/REDiTECH-NOC/3CX-Tools-Suite"
 
 RED='\033[0;31m'
@@ -47,7 +47,7 @@ ask()   { echo -en "${CYAN}$1${NC}"; }
 
 WALLBOARD_URL=""
 API_KEY=""
-PBX_URL=""
+PBX_URL="https://localhost"
 PBX_EXT=""
 PBX_PASS=""
 POLL_INTERVAL=750
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
     --autopager-key) AUTOPAGER_KEY="$2"; shift 2 ;;
     --help|-h)
       echo ""
-      echo "3CX Relay Agent Installer"
+      echo "3CXTools-Relay Installer"
       echo ""
       echo "Usage: install.sh [OPTIONS]"
       echo ""
@@ -78,7 +78,7 @@ while [[ $# -gt 0 ]]; do
       echo "Required:"
       echo "  --wallboard-url   Wallboard URL (e.g., https://wallboard.example.com:4200)"
       echo "  --api-key         Relay API key (from wallboard admin settings)"
-      echo "  --pbx-url         3CX PBX URL (e.g., https://localhost:5001)"
+      echo "  --pbx-url         3CX PBX URL (e.g., https://localhost)"
       echo "  --pbx-ext         3CX extension number for API access"
       echo "  --pbx-pass        3CX extension password"
       echo ""
@@ -104,15 +104,15 @@ fi
 
 echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}   3CX Relay Agent — Installer${NC}"
+echo -e "${BOLD}   3CXTools-Relay — Installer${NC}"
 echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
 echo ""
 
 # ─── Interactive Prompts ─────────────────────────────────────────
 
 if [[ "$INTERACTIVE" == true ]]; then
-  echo -e "${BOLD}This installer will set up the 3CX Relay Agent on this PBX.${NC}"
-  echo "The relay agent monitors queue data locally and pushes it to"
+  echo -e "${BOLD}This installer will set up the 3CXTools-Relay on this PBX.${NC}"
+  echo "The 3cxtools-relay monitors queue data locally and pushes it to"
   echo "your wallboard and/or auto-pager for real-time monitoring."
   echo ""
   echo -e "${BOLD}You'll need:${NC}"
@@ -126,7 +126,7 @@ if [[ "$INTERACTIVE" == true ]]; then
   echo ""
 
   while [[ -z "$WALLBOARD_URL" ]]; do
-    ask "Wallboard URL (e.g., https://10.0.1.225:4200): "
+    ask "Wallboard URL (e.g., https://wallboard.example.com:4200): "
     read -r WALLBOARD_URL
     if [[ -z "$WALLBOARD_URL" ]]; then
       echo -e "${RED}  Required.${NC}"
@@ -147,11 +147,9 @@ if [[ "$INTERACTIVE" == true ]]; then
   echo -e "${BOLD}── 3CX PBX Connection ──${NC}"
   echo ""
 
-  if [[ -z "$PBX_URL" ]]; then
-    ask "PBX URL [https://localhost:5001]: "
-    read -r PBX_URL
-    PBX_URL="${PBX_URL:-https://localhost:5001}"
-  fi
+  ask "PBX URL [${PBX_URL}]: "
+  read -r input_pbx_url
+  PBX_URL="${input_pbx_url:-$PBX_URL}"
 
   while [[ -z "$PBX_EXT" ]]; do
     ask "3CX extension number (admin API access): "
@@ -294,12 +292,12 @@ fi
 
 # ─── Download Relay Agent ────────────────────────────────────────
 
-info "Downloading relay agent from GitHub..."
+info "Downloading 3cxtools-relay from GitHub..."
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$CONFIG_DIR"
 
 BRANCH="main"
-DOWNLOAD_BASE="${REPO_URL}/raw/${BRANCH}/relay-agent"
+DOWNLOAD_BASE="${REPO_URL}/raw/${BRANCH}/3cxtools-relay"
 
 # Download source files and build locally
 TMP_DIR=$(mktemp -d)
@@ -360,7 +358,7 @@ echo "$NODE_INSTALLED_BY_US" > "${CONFIG_DIR}/.node_installed_by_relay"
 info "Creating systemd service..."
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<SERVICEEOF
 [Unit]
-Description=3CX Relay Agent
+Description=3CXTools-Relay
 After=network.target
 Wants=network-online.target
 
@@ -405,7 +403,7 @@ echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
 echo ""
 if systemctl is-active --quiet "$SERVICE_NAME"; then
-  info "3CX Relay Agent is running!"
+  info "3CXTools-Relay is running!"
 else
   warn "Service may have failed to start. Check logs below."
 fi

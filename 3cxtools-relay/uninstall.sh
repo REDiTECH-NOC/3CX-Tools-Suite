@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-SERVICE_NAME="3cx-relay"
-INSTALL_DIR="/opt/3cx-relay"
-CONFIG_DIR="/etc/3cx-relay"
+SERVICE_NAME="3cxtools-relay"
+INSTALL_DIR="/opt/3cxtools-relay"
+CONFIG_DIR="/etc/3cxtools-relay"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -30,7 +30,7 @@ fi
 
 echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}   3CX Relay Agent — Uninstaller${NC}"
+echo -e "${BOLD}   3CXTools-Relay — Uninstaller${NC}"
 echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -45,7 +45,7 @@ echo "  - systemd service: ${SERVICE_NAME}"
 echo "  - Install directory: ${INSTALL_DIR}"
 echo "  - Config directory: ${CONFIG_DIR}"
 if [[ "$NODE_INSTALLED_BY_US" == "true" ]]; then
-  echo "  - Node.js (installed by relay agent)"
+  echo "  - Node.js (installed by 3cxtools-relay)"
   echo "  - NodeSource apt repository"
 fi
 echo ""
@@ -96,7 +96,6 @@ if [[ "$NODE_INSTALLED_BY_US" == "true" ]]; then
   info "Removing Node.js..."
   if command -v apt-get &>/dev/null; then
     apt-get remove -y --purge nodejs 2>/dev/null || true
-    apt-get autoremove -y 2>/dev/null || true
     # Remove NodeSource repo
     rm -f /etc/apt/sources.list.d/nodesource.list
     rm -f /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
@@ -110,5 +109,5 @@ if [[ "$NODE_INSTALLED_BY_US" == "true" ]]; then
 fi
 
 echo ""
-info "3CX Relay Agent has been completely removed. No traces left."
+info "3CXTools-Relay has been completely removed. No traces left."
 echo ""

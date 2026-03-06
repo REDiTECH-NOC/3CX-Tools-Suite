@@ -597,12 +597,11 @@ export default function AdminSettingsPage() {
               </li>
             </ol>
             <pre className="mt-2 overflow-x-auto rounded bg-muted/50 p-2 font-mono text-[11px] text-muted-foreground">
-{`tar -xzf 3cx-relay-agent.tar.gz
-cd 3cx-relay
+{`tar -xzf 3cxtools-relay.tar.gz
+cd 3cxtools-relay
 sudo bash install.sh \\
   --wallboard-url https://your-wallboard:4200 \\
   --api-key <your-api-key> \\
-  --pbx-url https://localhost:5001 \\
   --pbx-ext 1000 \\
   --pbx-pass <extension-password>`}
             </pre>
@@ -611,10 +610,10 @@ sudo bash install.sh \\
                 The agent installs as a systemd service and pushes data every 2s.
               </p>
               <p>
-                Logs: <code className="rounded bg-muted px-1 py-0.5">journalctl -u 3cx-relay -f</code>
+                Logs: <code className="rounded bg-muted px-1 py-0.5">journalctl -u 3cxtools-relay -f</code>
               </p>
               <p>
-                Uninstall: <code className="rounded bg-muted px-1 py-0.5">sudo bash /opt/3cx-relay/uninstall.sh</code>
+                Uninstall: <code className="rounded bg-muted px-1 py-0.5">sudo bash /opt/3cxtools-relay/uninstall.sh</code>
               </p>
             </div>
           </div>

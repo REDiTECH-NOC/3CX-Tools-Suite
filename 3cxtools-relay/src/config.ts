@@ -17,13 +17,13 @@ export interface RelayConfig {
   autoPagerApiKey?: string;
 }
 
-const DEFAULT_CONFIG_PATH = '/etc/3cx-relay/config.json';
+const DEFAULT_CONFIG_PATH = '/etc/3cxtools-relay/config.json';
 const DEFAULT_POLL_INTERVAL = 750;
 
 /**
  * Load configuration from (in priority order):
  * 1. CLI arguments (--wallboard-url, --api-key, etc.)
- * 2. Config file (/etc/3cx-relay/config.json or --config path)
+ * 2. Config file (/etc/3cxtools-relay/config.json or --config path)
  * 3. Environment variables (WALLBOARD_URL, API_KEY, PBX_URL, etc.)
  */
 export function loadConfig(): RelayConfig {
@@ -71,8 +71,8 @@ export function loadConfig(): RelayConfig {
 
   if (missing.length > 0) {
     console.error(`[Config] Missing required fields: ${missing.join(', ')}`);
-    console.error('Usage: 3cx-relay --wallboard-url URL --api-key KEY --pbx-url URL --pbx-ext EXT --pbx-pass PASS');
-    console.error('Or create /etc/3cx-relay/config.json with those fields.');
+    console.error('Usage: 3cxtools-relay --wallboard-url URL --api-key KEY --pbx-url URL --pbx-ext EXT --pbx-pass PASS');
+    console.error('Or create /etc/3cxtools-relay/config.json with those fields.');
     process.exit(1);
   }
 

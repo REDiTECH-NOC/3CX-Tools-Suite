@@ -345,7 +345,7 @@ function logStatus(): void {
 // ─── Start ────────────────────────────────────────────────────
 
 async function start(): Promise<void> {
-  console.log('=== 3CX Relay Agent (WebSocket) ===');
+  console.log('=== 3CXTools-Relay ===');
   console.log(`PBX: ${config.pbxUrl}`);
   console.log(`Wallboard WS: ${config.wallboardWsUrl}`);
   console.log(`Wallboard HTTP: ${config.wallboardUrl} (fallback)`);
