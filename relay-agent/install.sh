@@ -243,12 +243,6 @@ if ! command -v curl &>/dev/null; then
   apt-get update -qq && apt-get install -y -qq curl
 fi
 
-# Install git if missing (needed for cloning repo)
-if ! command -v git &>/dev/null; then
-  info "Installing git..."
-  apt-get update -qq && apt-get install -y -qq git
-fi
-
 # ─── Check/Install Node.js ───────────────────────────────────────
 
 NODE_INSTALLED_BY_US=false
