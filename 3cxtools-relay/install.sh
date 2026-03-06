@@ -55,9 +55,11 @@ LOG_LEVEL="info"
 AUTOPAGER_URL=""
 AUTOPAGER_KEY=""
 INTERACTIVE=true
+UPDATE_ONLY=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --update)        UPDATE_ONLY=true; INTERACTIVE=false; shift ;;
     --wallboard-url) WALLBOARD_URL="$2"; INTERACTIVE=false; shift 2 ;;
     --api-key)       API_KEY="$2"; shift 2 ;;
     --pbx-url)       PBX_URL="$2"; shift 2 ;;
@@ -75,7 +77,10 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Run without arguments for interactive mode, or provide:"
       echo ""
-      echo "Required:"
+      echo "Update (keeps existing config):"
+      echo "  --update          Update code only, keep existing /etc/3cxtools-relay/config.json"
+      echo ""
+      echo "Required (fresh install):"
       echo "  --wallboard-url   Wallboard URL (e.g., https://wallboard.example.com:4200)"
       echo "  --api-key         Relay API key (from wallboard admin settings)"
       echo "  --pbx-url         3CX PBX URL (e.g., https://localhost)"
@@ -98,6 +103,106 @@ done
 
 if [[ $EUID -ne 0 ]]; then
   error "This script must be run as root (use sudo)"
+fi
+
+# ─── Update Mode (code-only, keep config) ─────────────────────────
+
+if [[ "$UPDATE_ONLY" == true ]]; then
+  if [[ ! -f "${CONFIG_DIR}/config.json" ]]; then
+    error "No existing config found at ${CONFIG_DIR}/config.json. Run a fresh install instead."
+  fi
+
+  echo ""
+  echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
+  echo -e "${BOLD}   3CXTools-Relay — Update${NC}"
+  echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
+  echo ""
+  info "Updating code only — keeping existing config."
+
+  # Check/install Node
+  if ! check_node; then
+    install_node
+  fi
+
+  # Stop service
+  if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    info "Stopping ${SERVICE_NAME}..."
+    systemctl stop "$SERVICE_NAME"
+  fi
+
+  # Download and build
+  info "Downloading 3cxtools-relay from GitHub..."
+  mkdir -p "$INSTALL_DIR"
+  BRANCH="main"
+  DOWNLOAD_BASE="${REPO_URL}/raw/${BRANCH}/3cxtools-relay"
+  TMP_DIR=$(mktemp -d)
+  trap "rm -rf $TMP_DIR" EXIT
+
+  info "Downloading source files..."
+  for file in package.json tsconfig.json src/index.ts src/collector.ts src/config.ts src/monitor.ts src/pusher.ts src/state-manager.ts; do
+    mkdir -p "$TMP_DIR/$(dirname $file)"
+    curl -fsSL "${DOWNLOAD_BASE}/${file}" -o "$TMP_DIR/$file" || error "Failed to download $file"
+  done
+
+  info "Installing dependencies..."
+  cd "$TMP_DIR"
+  npm install --production=false 2>/dev/null
+
+  info "Building TypeScript..."
+  npx tsc
+
+  info "Copying to ${INSTALL_DIR}..."
+  cp -r "$TMP_DIR/dist/"* "$INSTALL_DIR/"
+  cp "$TMP_DIR/package.json" "$INSTALL_DIR/"
+
+  info "Installing production dependencies..."
+  cd "$INSTALL_DIR"
+  npm install --production 2>/dev/null
+
+  # Restart service
+  info "Starting ${SERVICE_NAME}..."
+  systemctl daemon-reload
+  systemctl start "$SERVICE_NAME"
+
+  sleep 2
+
+  echo ""
+  echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
+  echo ""
+  if systemctl is-active --quiet "$SERVICE_NAME"; then
+    info "3CXTools-Relay updated and running!"
+  else
+    warn "Service may have failed to start. Check logs below."
+  fi
+  echo ""
+  echo "  Logs: journalctl -u ${SERVICE_NAME} -f"
+  echo ""
+  echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
+  echo ""
+  journalctl -u "$SERVICE_NAME" -n 10 --no-pager 2>/dev/null || true
+  exit 0
+fi
+
+# ─── Auto-detect existing install (offer update) ─────────────────
+
+if [[ "$INTERACTIVE" == true ]] && [[ -f "${CONFIG_DIR}/config.json" ]]; then
+  echo ""
+  echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
+  echo -e "${BOLD}   3CXTools-Relay — Installer${NC}"
+  echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
+  echo ""
+  info "Existing installation detected at ${INSTALL_DIR}"
+  echo ""
+  ask "Update code only (keep config)? [Y/n]: "
+  read -r update_choice
+  if [[ ! "$update_choice" =~ ^[Nn] ]]; then
+    UPDATE_ONLY=true
+    # Re-exec with --update flag
+    exec bash "$0" --update
+  fi
+  echo ""
+  info "Proceeding with fresh install..."
+  echo ""
 fi
 
 # ─── Banner ───────────────────────────────────────────────────────
