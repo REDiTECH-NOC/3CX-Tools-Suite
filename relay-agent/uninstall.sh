@@ -34,10 +34,20 @@ echo -e "${BOLD}   3CX Relay Agent — Uninstaller${NC}"
 echo -e "${BOLD}════════════════════════════════════════════════════════${NC}"
 echo ""
 
+# Check if Node.js was installed by us
+NODE_INSTALLED_BY_US=false
+if [[ -f "${CONFIG_DIR}/.node_installed_by_relay" ]]; then
+  NODE_INSTALLED_BY_US=$(cat "${CONFIG_DIR}/.node_installed_by_relay")
+fi
+
 echo -e "${CYAN}This will remove:${NC}"
 echo "  - systemd service: ${SERVICE_NAME}"
 echo "  - Install directory: ${INSTALL_DIR}"
 echo "  - Config directory: ${CONFIG_DIR}"
+if [[ "$NODE_INSTALLED_BY_US" == "true" ]]; then
+  echo "  - Node.js (installed by relay agent)"
+  echo "  - NodeSource apt repository"
+fi
 echo ""
 
 if [[ "$AUTO_YES" != true ]]; then
@@ -81,9 +91,24 @@ if [[ -d "$CONFIG_DIR" ]]; then
   rm -rf "$CONFIG_DIR"
 fi
 
+# Remove Node.js if we installed it
+if [[ "$NODE_INSTALLED_BY_US" == "true" ]]; then
+  info "Removing Node.js..."
+  if command -v apt-get &>/dev/null; then
+    apt-get remove -y --purge nodejs 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+    # Remove NodeSource repo
+    rm -f /etc/apt/sources.list.d/nodesource.list
+    rm -f /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
+    rm -f /usr/share/keyrings/nodesource.gpg 2>/dev/null || true
+    apt-get update -qq 2>/dev/null || true
+  elif command -v yum &>/dev/null; then
+    yum remove -y nodejs 2>/dev/null || true
+    rm -f /etc/yum.repos.d/nodesource*.repo 2>/dev/null || true
+  fi
+  info "Node.js removed"
+fi
+
 echo ""
-info "3CX Relay Agent has been removed."
-echo ""
-echo "  Note: Node.js was NOT removed."
-echo "  To remove it: apt remove nodejs (Debian) or yum remove nodejs (RHEL)"
+info "3CX Relay Agent has been completely removed. No traces left."
 echo ""

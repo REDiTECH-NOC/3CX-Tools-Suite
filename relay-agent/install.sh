@@ -235,7 +235,23 @@ if [[ -z "$WALLBOARD_URL" || -z "$API_KEY" || -z "$PBX_URL" || -z "$PBX_EXT" || 
   error "Missing required fields. Run with --help for usage."
 fi
 
+# ─── Install prerequisites ───────────────────────────────────────
+
+# Install curl if missing (3CX Debian may not have it)
+if ! command -v curl &>/dev/null; then
+  info "Installing curl..."
+  apt-get update -qq && apt-get install -y -qq curl
+fi
+
+# Install git if missing (needed for cloning repo)
+if ! command -v git &>/dev/null; then
+  info "Installing git..."
+  apt-get update -qq && apt-get install -y -qq git
+fi
+
 # ─── Check/Install Node.js ───────────────────────────────────────
+
+NODE_INSTALLED_BY_US=false
 
 check_node() {
   if command -v node &>/dev/null; then
@@ -254,6 +270,7 @@ check_node() {
 
 install_node() {
   info "Installing Node.js ${REQUIRED_NODE_MAJOR}.x..."
+  NODE_INSTALLED_BY_US=true
 
   if command -v apt-get &>/dev/null; then
     curl -fsSL https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | bash -
@@ -340,6 +357,9 @@ cat > "${CONFIG_DIR}/config.json" <<CONFIGEOF
 CONFIGEOF
 
 chmod 600 "${CONFIG_DIR}/config.json"
+
+# Track what we installed so uninstall can clean up completely
+echo "$NODE_INSTALLED_BY_US" > "${CONFIG_DIR}/.node_installed_by_relay"
 
 # ─── Create systemd Service ──────────────────────────────────────
 
