@@ -15,6 +15,14 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 
+AUTO_YES=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --yes|-y) AUTO_YES=true; shift ;;
+    *) shift ;;
+  esac
+done
+
 if [[ $EUID -ne 0 ]]; then
   echo -e "${RED}[ERROR]${NC} This script must be run as root (use sudo)"
   exit 1
@@ -31,11 +39,14 @@ echo "  - systemd service: ${SERVICE_NAME}"
 echo "  - Install directory: ${INSTALL_DIR}"
 echo "  - Config directory: ${CONFIG_DIR}"
 echo ""
-echo -en "${CYAN}Are you sure? [y/N]: ${NC}"
-read -r confirm
-if [[ ! "$confirm" =~ ^[Yy] ]]; then
-  echo "Aborted."
-  exit 0
+
+if [[ "$AUTO_YES" != true ]]; then
+  echo -en "${CYAN}Are you sure? [y/N]: ${NC}"
+  read -r confirm
+  if [[ ! "$confirm" =~ ^[Yy] ]]; then
+    echo "Aborted."
+    exit 0
+  fi
 fi
 
 echo ""
