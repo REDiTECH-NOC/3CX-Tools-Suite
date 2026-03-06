@@ -288,11 +288,15 @@ async function fastPoll(): Promise<void> {
         const user = cachedUserMap.get(ext);
         const callState = deriveCallState(ext, activeCalls, user);
         const wsLoggedIn = monitor.isAgentLoggedIn(queue.Number, ext);
+        // WebSocket monitor is authoritative for per-queue login status.
+        // Fallback to REST API QueueStatus (global — logged into ANY queue = "LoggedIn").
+        // Not perfect for per-queue, but much better than defaulting to true.
+        const loggedIn = wsLoggedIn ?? (user?.QueueStatus === 'LoggedIn');
 
         agents.push({
           ext,
           name: user ? `${user.FirstName} ${user.LastName}`.trim() : ext,
-          loggedIn: wsLoggedIn ?? true,
+          loggedIn,
           callState,
           profileName: user?.CurrentProfileName ?? 'Unknown',
           isRegistered: user?.IsRegistered ?? false,
