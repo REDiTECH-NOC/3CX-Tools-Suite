@@ -3,14 +3,27 @@ set -e
 
 # ─── 3CX Relay Agent Installer ───────────────────────────────────
 #
-# Interactive installer — run on the PBX server:
-#   curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/install.sh | sudo bash
+# Download and run (interactive):
+#   curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/install.sh -o /tmp/install-relay.sh && sudo bash /tmp/install-relay.sh
 #
-# Or with arguments (non-interactive):
-#   ./install.sh --wallboard-url https://wallboard:4200 --api-key KEY \
+# Or with arguments (non-interactive / piped):
+#   curl -sSL .../install.sh | sudo bash -s -- --wallboard-url https://wallboard:4200 --api-key KEY \
 #     --pbx-url https://localhost:5001 --pbx-ext 1000 --pbx-pass secret
 #
 # ──────────────────────────────────────────────────────────────────
+
+# If stdin is not a terminal (piped), force non-interactive unless args are given
+if [[ ! -t 0 ]] && [[ $# -eq 0 ]]; then
+  echo ""
+  echo "ERROR: Interactive mode requires a terminal."
+  echo ""
+  echo "Download the script first, then run it:"
+  echo "  curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/install.sh -o /tmp/install-relay.sh"
+  echo "  sudo bash /tmp/install-relay.sh"
+  echo ""
+  echo "Or use non-interactive mode with arguments (run with --help for usage)."
+  exit 1
+fi
 
 INSTALL_DIR="/opt/3cx-relay"
 CONFIG_DIR="/etc/3cx-relay"
