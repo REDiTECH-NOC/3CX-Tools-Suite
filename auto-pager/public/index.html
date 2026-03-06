@@ -450,6 +450,25 @@
       </div>
 
       <button class="btn btn-primary mt-2" onclick="saveSettings()">Save Settings</button>
+
+      <div class="card" style="margin-top: 16px;">
+        <h2>Relay Agent</h2>
+        <p class="text-xs text-muted mb-2">The relay agent runs on the PBX and pushes real-time queue data to the auto-pager. When active, it replaces API polling with sub-second updates.</p>
+        <div class="flex items-center gap-2 mb-2">
+          <label class="text-sm" style="margin-right: 8px;">Relay Mode</label>
+          <button class="btn btn-sm" id="relayToggleBtn" onclick="toggleRelay()">Enable</button>
+          <span class="badge badge-yellow" id="relayStatusBadge">Unknown</span>
+        </div>
+        <div class="form-group" style="margin-top: 12px;">
+          <label>API Key</label>
+          <div class="flex gap-2">
+            <input type="text" id="relayApiKeyDisplay" readonly placeholder="No key generated" style="font-family: monospace; font-size: 0.8rem;" />
+            <button class="btn btn-outline btn-sm" onclick="generateRelayKey()">Generate New Key</button>
+          </div>
+          <p class="text-xs text-muted" style="margin-top: 4px;">Copy this key into the relay agent's config or the RCC deploy dialog. Generating a new key invalidates the old one.</p>
+        </div>
+        <div id="relayDetails" class="text-xs text-muted" style="margin-top: 8px;"></div>
+      </div>
     </div>
 
     <!-- Queues Tab -->
@@ -662,6 +681,76 @@ async function saveSettings() {
   await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
   toast('Settings saved');
   loadStatus();
+}
+
+// ── Relay Agent ──
+async function loadRelayStatus() {
+  try {
+    const status = await api('/relay/status');
+    const badge = document.getElementById('relayStatusBadge');
+    const btn = document.getElementById('relayToggleBtn');
+    const details = document.getElementById('relayDetails');
+
+    if (status.enabled) {
+      btn.textContent = 'Disable';
+      btn.className = 'btn btn-sm btn-outline';
+      if (status.hasFreshData) {
+        badge.textContent = 'Connected';
+        badge.className = 'badge badge-green';
+        const ageSec = Math.round(status.ageMs / 1000);
+        details.textContent = `Last push: ${ageSec}s ago` + (status.ip ? ` from ${status.ip}` : '');
+      } else if (status.lastReceivedAt > 0) {
+        badge.textContent = 'Stale';
+        badge.className = 'badge badge-yellow';
+        const ageSec = Math.round(status.ageMs / 1000);
+        details.textContent = `Last push: ${ageSec}s ago — relay may be offline`;
+      } else {
+        badge.textContent = 'Waiting';
+        badge.className = 'badge badge-yellow';
+        details.textContent = 'Enabled but no data received yet. Install the relay agent on the PBX.';
+      }
+    } else {
+      btn.textContent = 'Enable';
+      btn.className = 'btn btn-sm btn-primary';
+      badge.textContent = 'Disabled';
+      badge.className = 'badge badge-red';
+      details.textContent = 'Relay mode is off. The auto-pager polls the PBX directly.';
+    }
+  } catch {}
+}
+
+async function toggleRelay() {
+  const btn = document.getElementById('relayToggleBtn');
+  const isEnabled = btn.textContent.trim() === 'Disable';
+  try {
+    await api('/relay/config', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: !isEnabled }),
+    });
+    toast(isEnabled ? 'Relay disabled' : 'Relay enabled');
+    loadRelayStatus();
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+async function generateRelayKey() {
+  // Generate a random key client-side, send to server to hash & store
+  const chars = 'abcdef0123456789';
+  let key = 'ap_relay_';
+  for (let i = 0; i < 40; i++) key += chars[Math.floor(Math.random() * chars.length)];
+
+  try {
+    await api('/relay/config', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: true, apiKey: key }),
+    });
+    document.getElementById('relayApiKeyDisplay').value = key;
+    toast('New relay API key generated. Copy it now — it won\'t be shown again.');
+    loadRelayStatus();
+  } catch (err) {
+    toast('Error: ' + err.message, 'error');
+  }
 }
 
 async function testConnection() {
@@ -1044,9 +1133,12 @@ async function initApp() {
   await loadMonitoredQueues();
   await loadStatus();
   await loadPageLog();
+  await loadRelayStatus();
 
   // Auto-refresh status every 5 seconds
   setInterval(loadStatus, 5000);
+  // Refresh relay status every 10 seconds
+  setInterval(loadRelayStatus, 10000);
   // Refresh log every 15 seconds
   setInterval(loadPageLog, 15000);
 }
