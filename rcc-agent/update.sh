@@ -21,8 +21,9 @@ cp "$TMP_DIR/rcc-agent/systemd/relay-agent.service" "$INSTALL_DIR/systemd/" 2>/d
 
 echo "[Update] Installing dependencies..."
 cd "$INSTALL_DIR"
-npm install --production 2>/dev/null
+npm install 2>/dev/null
 npm run build
+npm prune --production 2>/dev/null
 
 echo "[Update] Fixing permissions..."
 chown -R reditech:reditech "$INSTALL_DIR"
