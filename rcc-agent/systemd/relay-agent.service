@@ -1,0 +1,27 @@
+[Unit]
+Description=REDiTECH Relay Agent
+Documentation=https://github.com/REDiTECH-NOC/3CX-Tools-Suite
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=reditech
+WorkingDirectory=/opt/reditech-relay-agent
+EnvironmentFile=/opt/reditech-relay-agent/.env
+ExecStart=/usr/bin/node /opt/reditech-relay-agent/dist/index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=relay-agent
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/reditech-relay-agent
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
