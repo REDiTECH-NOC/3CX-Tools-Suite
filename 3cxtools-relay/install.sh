@@ -105,6 +105,44 @@ if [[ $EUID -ne 0 ]]; then
   error "This script must be run as root (use sudo)"
 fi
 
+# ─── Node.js Functions (defined early for update mode) ────────────
+
+NODE_INSTALLED_BY_US=false
+
+check_node() {
+  if command -v node &>/dev/null; then
+    local version
+    version=$(node -v | sed 's/v//' | cut -d. -f1)
+    if [[ "$version" -ge "$REQUIRED_NODE_MAJOR" ]]; then
+      info "Node.js $(node -v) found"
+      return 0
+    else
+      warn "Node.js $(node -v) is too old (need v${REQUIRED_NODE_MAJOR}+)"
+      return 1
+    fi
+  fi
+  return 1
+}
+
+install_node() {
+  info "Installing Node.js ${REQUIRED_NODE_MAJOR}.x..."
+  NODE_INSTALLED_BY_US=true
+
+  if command -v apt-get &>/dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | bash -
+    apt-get install -y nodejs
+  elif command -v yum &>/dev/null; then
+    curl -fsSL https://rpm.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | bash -
+    yum install -y nodejs
+  else
+    error "Unsupported package manager. Please install Node.js ${REQUIRED_NODE_MAJOR}+ manually."
+  fi
+
+  if ! check_node; then
+    error "Node.js installation failed"
+  fi
+}
+
 # ─── Update Mode (code-only, keep config) ─────────────────────────
 
 if [[ "$UPDATE_ONLY" == true ]]; then
@@ -347,42 +385,6 @@ if ! command -v curl &>/dev/null; then
 fi
 
 # ─── Check/Install Node.js ───────────────────────────────────────
-
-NODE_INSTALLED_BY_US=false
-
-check_node() {
-  if command -v node &>/dev/null; then
-    local version
-    version=$(node -v | sed 's/v//' | cut -d. -f1)
-    if [[ "$version" -ge "$REQUIRED_NODE_MAJOR" ]]; then
-      info "Node.js $(node -v) found"
-      return 0
-    else
-      warn "Node.js $(node -v) is too old (need v${REQUIRED_NODE_MAJOR}+)"
-      return 1
-    fi
-  fi
-  return 1
-}
-
-install_node() {
-  info "Installing Node.js ${REQUIRED_NODE_MAJOR}.x..."
-  NODE_INSTALLED_BY_US=true
-
-  if command -v apt-get &>/dev/null; then
-    curl -fsSL https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | bash -
-    apt-get install -y nodejs
-  elif command -v yum &>/dev/null; then
-    curl -fsSL https://rpm.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x | bash -
-    yum install -y nodejs
-  else
-    error "Unsupported package manager. Please install Node.js ${REQUIRED_NODE_MAJOR}+ manually."
-  fi
-
-  if ! check_node; then
-    error "Node.js installation failed"
-  fi
-}
 
 if ! check_node; then
   install_node
