@@ -113,7 +113,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     status: 200,
     headers: {
       'Content-Type': 'application/gzip',
-      'Content-Disposition': 'attachment; filename="3cx-3cxtools-relay.tar.gz"',
+      'Content-Disposition': 'attachment; filename="3cxtools-relay.tar.gz"',
       'Content-Length': String(gzipped.length),
     },
   });

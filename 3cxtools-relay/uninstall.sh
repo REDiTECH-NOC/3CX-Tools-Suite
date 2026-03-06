@@ -92,11 +92,12 @@ if [[ -d "$CONFIG_DIR" ]]; then
 fi
 
 # Remove Node.js if we installed it
+# SAFETY: Only removes nodejs itself — never runs autoremove or touches other packages
 if [[ "$NODE_INSTALLED_BY_US" == "true" ]]; then
-  info "Removing Node.js..."
+  info "Removing Node.js (only — no other packages will be touched)..."
   if command -v apt-get &>/dev/null; then
-    apt-get remove -y --purge nodejs 2>/dev/null || true
-    # Remove NodeSource repo
+    apt-get remove -y --purge -o APT::AutoRemove::SuggestsImportant=true nodejs 2>/dev/null || true
+    # Remove NodeSource repo only
     rm -f /etc/apt/sources.list.d/nodesource.list
     rm -f /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
     rm -f /usr/share/keyrings/nodesource.gpg 2>/dev/null || true
@@ -105,7 +106,7 @@ if [[ "$NODE_INSTALLED_BY_US" == "true" ]]; then
     yum remove -y nodejs 2>/dev/null || true
     rm -f /etc/yum.repos.d/nodesource*.repo 2>/dev/null || true
   fi
-  info "Node.js removed"
+  info "Node.js removed (run 'apt autoremove' manually if you want to clean up unused deps)"
 fi
 
 echo ""
