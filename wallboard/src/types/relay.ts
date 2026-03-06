@@ -1,6 +1,6 @@
 // Types for the PBX relay agent push protocol
 
-/** Top-level payload sent by the relay agent via WebSocket or POST */
+/** Top-level payload sent by the relay agent via HTTP POST */
 export interface RelayPushPayload {
   version: 1;
   ts: number; // unix ms timestamp from relay agent

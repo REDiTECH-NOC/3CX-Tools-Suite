@@ -30,7 +30,7 @@ COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 RUN mkdir -p .next/cache && chown -R nextjs:nodejs .next/cache
 RUN chown -R nextjs:nodejs node_modules/.prisma
 USER nextjs
-EXPOSE 3000 3100
+EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 CMD ["sh", "-c", "ENCODED_PW=$(echo -n \"$POSTGRES_PASSWORD\" | sed 's/#/%23/g; s/@/%40/g; s/:/%3A/g') && export DATABASE_URL=\"postgresql://${POSTGRES_USER}:${ENCODED_PW}@${POSTGRES_HOST:-db}:5432/${POSTGRES_DB}\" && node node_modules/prisma/build/index.js db push --accept-data-loss && node server.js"]

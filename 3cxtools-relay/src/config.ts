@@ -1,10 +1,7 @@
 import * as fs from 'fs';
-import * as path from 'path';
 
 export interface RelayConfig {
   wallboardUrl: string;
-  /** WebSocket URL for persistent connection (derived from wallboardUrl if not set) */
-  wallboardWsUrl: string;
   apiKey: string;
   pbxUrl: string;
   pbxExtension: string;
@@ -41,16 +38,8 @@ export function loadConfig(): RelayConfig {
     }
   }
 
-  const wallboardUrl = args['wallboard-url'] || fileConfig.wallboardUrl || process.env.WALLBOARD_URL || '';
-
-  // Derive WebSocket URL from wallboard URL if not explicitly set
-  // e.g. https://wallboard:4200 → ws://wallboard:3100
-  const explicitWsUrl = args['wallboard-ws-url'] || fileConfig.wallboardWsUrl || process.env.WALLBOARD_WS_URL || '';
-  const wallboardWsUrl = explicitWsUrl || deriveWsUrl(wallboardUrl);
-
   const config: RelayConfig = {
-    wallboardUrl,
-    wallboardWsUrl,
+    wallboardUrl: args['wallboard-url'] || fileConfig.wallboardUrl || process.env.WALLBOARD_URL || '',
     apiKey: args['api-key'] || fileConfig.apiKey || process.env.API_KEY || '',
     pbxUrl: args['pbx-url'] || fileConfig.pbxUrl || process.env.PBX_URL || '',
     pbxExtension: args['pbx-ext'] || fileConfig.pbxExtension || process.env.PBX_EXTENSION || '',
@@ -77,25 +66,6 @@ export function loadConfig(): RelayConfig {
   }
 
   return config;
-}
-
-/**
- * Derive a WebSocket URL from the wallboard HTTP URL.
- * https://wallboard:4200 → ws://wallboard:3100
- * http://wallboard:4200  → ws://wallboard:3100
- */
-function deriveWsUrl(httpUrl: string): string {
-  if (!httpUrl) return '';
-  try {
-    const u = new URL(httpUrl);
-    const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${wsProto}//${u.hostname}:3100`;
-  } catch {
-    // Fallback: just replace protocol and swap port
-    return httpUrl
-      .replace(/^https?:\/\//, 'ws://')
-      .replace(/:\d+/, ':3100');
-  }
 }
 
 function parseArgs(argv: string[]): Record<string, string> {

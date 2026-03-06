@@ -18,7 +18,6 @@ services:
     restart: unless-stopped
     ports:
       - "${WALLBOARD_PORT:-4200}:3000"
-      - "${RELAY_WS_PORT:-3100}:3100"
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-wallboard}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}

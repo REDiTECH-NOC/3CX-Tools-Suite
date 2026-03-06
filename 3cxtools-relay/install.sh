@@ -304,7 +304,7 @@ TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 info "Downloading source files..."
-for file in package.json tsconfig.json src/index.ts src/collector.ts src/config.ts src/monitor.ts src/pusher.ts src/state-manager.ts src/ws-client.ts; do
+for file in package.json tsconfig.json src/index.ts src/collector.ts src/config.ts src/monitor.ts src/pusher.ts src/state-manager.ts; do
   mkdir -p "$TMP_DIR/$(dirname $file)"
   curl -fsSL "${DOWNLOAD_BASE}/${file}" -o "$TMP_DIR/$file" || error "Failed to download $file"
 done

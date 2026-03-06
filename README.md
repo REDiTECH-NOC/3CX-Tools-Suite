@@ -9,11 +9,11 @@ Three independent tools for real-time 3CX PBX monitoring and automation.
 │  ┌──────────────┐  ┌──────────┐  ┌───────────────┐            │
 │  │  Wallboard   │  │ Postgres │  │  Auto-Pager   │            │
 │  │  :4200       │  │  :5432   │  │  :3001        │            │
-│  │  WS :3100    │  │          │  │  SIP :5060    │            │
+│  │              │  │          │  │  SIP :5060    │            │
 │  └──────┬───────┘  └──────────┘  └───────┬───────┘            │
 │         │                                 │                     │
 └─────────┼─────────────────────────────────┼─────────────────────┘
-          │  WebSocket (persistent)         │  HTTP POST (on change)
+          │  HTTP POST (on change)          │  HTTP POST (on change)
           │                                 │
 ┌─────────┴─────────────────────────────────┴─────────────────────┐
 │                        3CX PBX Server                           │
@@ -30,7 +30,7 @@ Three independent tools for real-time 3CX PBX monitoring and automation.
 
 | Tool | Purpose | Runs On | Port(s) |
 |------|---------|---------|---------|
-| **Wallboard** | Real-time queue dashboard + analytics | Docker | 4200, 3100 (WS) |
+| **Wallboard** | Real-time queue dashboard + analytics | Docker | 4200 |
 | **Auto-Pager** | Queue overflow auto-paging via Asterisk | Docker | 3001, 5060 (SIP) |
 | **3CXTools-Relay** | PBX-local data collector, pushes to wallboard + auto-pager | PBX (systemd) | none |
 
@@ -415,8 +415,7 @@ docker compose exec auto-pager asterisk -rx "core show channels"
 
 | Port | Protocol | Service | Purpose |
 |------|----------|---------|---------|
-| 4200 | TCP | Wallboard | Web UI + API |
-| 3100 | TCP | Wallboard | WebSocket (relay connection) |
+| 4200 | TCP | Wallboard | Web UI + API + relay push endpoint |
 | 5432 | TCP | PostgreSQL | Database (internal, not exposed by default) |
 | 3001 | TCP | Auto-Pager | Web UI + API + relay push endpoint |
 | 5060 | UDP | Auto-Pager | SIP (Asterisk → PBX for paging calls) |
@@ -424,13 +423,12 @@ docker compose exec auto-pager asterisk -rx "core show channels"
 ### Firewall Rules
 
 **Docker host** needs inbound:
-- `4200/tcp` — wallboard web UI (from browsers)
-- `3100/tcp` — relay WebSocket (from PBX)
+- `4200/tcp` — wallboard web UI (from browsers) + relay push (from PBX)
 - `3001/tcp` — auto-pager web UI (from browsers) + relay push (from PBX)
 - `5060/udp` — SIP (from/to PBX for paging)
 
 **PBX** needs outbound:
-- `3100/tcp` — WebSocket to wallboard
+- `4200/tcp` — HTTP POST to wallboard
 - `3001/tcp` — HTTP POST to auto-pager (if configured)
 
 ---

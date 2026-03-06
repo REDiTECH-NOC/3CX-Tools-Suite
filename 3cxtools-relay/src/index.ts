@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 3CX Relay Agent — Entry Point (WebSocket Architecture)
+ * 3CXTools-Relay — Entry Point (HTTP Push Architecture)
  *
  * Split polling architecture:
  *   FAST (750ms): ActiveCalls only — detects call state changes instantly
@@ -11,14 +11,13 @@
  *
  * Agent login/logout: Event-driven via PBX MyPhone WebSocket (no polling).
  * Change detection: Fingerprinting — only pushes when state actually differs.
- * Transport: Persistent WebSocket to wallboard + optional HTTP to auto-pager.
+ * Transport: HTTP POST to wallboard + optional HTTP POST to auto-pager.
  */
 
 import { loadConfig } from './config';
 import { Collector } from './collector';
 import type { ActiveCall, PbxQueue, PbxUser, QueueAgent, QueueDetailedStats } from './collector';
 import { QueueMonitor } from './monitor';
-import { WsClient } from './ws-client';
 import { StateManager } from './state-manager';
 import type { RelayQueueData, RelayAgentData, RelayQueuedCall, RelayPushPayload, RelayReportStats } from './state-manager';
 import { Pusher } from './pusher';
@@ -36,8 +35,10 @@ const PBX_TIMEZONE = 'America/Chicago';      // TODO: make configurable or detec
 const config = loadConfig();
 const collector = new Collector(config.pbxUrl, config.pbxExtension, config.pbxPassword);
 const monitor = new QueueMonitor(config.pbxUrl, config.pbxExtension, config.pbxPassword);
-const wsClient = new WsClient(config.wallboardWsUrl, config.apiKey);
 const stateManager = new StateManager();
+
+// HTTP Pushers — wallboard is required, auto-pager is optional
+const wallboardPusher = new Pusher(config.wallboardUrl, config.apiKey);
 
 const autoPagerPusher = config.autoPagerUrl && config.autoPagerApiKey
   ? new Pusher(config.autoPagerUrl, config.autoPagerApiKey)
@@ -63,22 +64,26 @@ let lastReportFetch = 0;
 // ─── Wire up event-driven pushes ──────────────────────────────
 
 stateManager.on('change', (payload: RelayPushPayload) => {
-  const sent = wsClient.send(payload);
-  if (sent) _pushCount++;
+  // Push to wallboard via HTTP
+  if (!wallboardPusher.isAuthFailed()) {
+    wallboardPusher.push(payload).then(r => { if (r.success) _pushCount++; }).catch(() => {});
+  }
 
+  // Push to auto-pager via HTTP
   if (autoPagerPusher && !autoPagerPusher.isAuthFailed()) {
     autoPagerPusher.push(payload).catch(() => {});
   }
 
   if (config.logLevel === 'debug') {
     const totalWaiting = payload.queues.reduce((s, q) => s + q.callsWaiting, 0);
-    console.log(`[Relay] CHANGE: ${payload.queues.length}q, ${totalWaiting} waiting (ws=${sent ? 'sent' : 'buffered'})`);
+    console.log(`[Relay] CHANGE: ${payload.queues.length}q, ${totalWaiting} waiting`);
   }
 });
 
 stateManager.on('sync', (payload: RelayPushPayload) => {
-  const sent = wsClient.send(payload);
-  if (sent) _pushCount++;
+  if (!wallboardPusher.isAuthFailed()) {
+    wallboardPusher.push(payload).then(r => { if (r.success) _pushCount++; }).catch(() => {});
+  }
 
   if (autoPagerPusher && !autoPagerPusher.isAuthFailed()) {
     autoPagerPusher.push(payload).catch(() => {});
@@ -166,11 +171,6 @@ async function refreshSlowData(): Promise<void> {
       console.error('[Relay] Report API failed:', err instanceof Error ? err.message : err);
     }
   }
-}
-
-/** Force an immediate refresh of agent membership (called via WS command from wallboard). */
-function forceAgentRefresh(): void {
-  lastAgentsFetch = 0;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -332,12 +332,12 @@ async function fastPoll(): Promise<void> {
 
 function logStatus(): void {
   if (!running) return;
-  const ws = wsClient.isConnected() ? 'connected' : 'disconnected';
+  const wb = wallboardPusher.isAuthFailed() ? 'auth-failed' : 'active';
   const mon = monitor.hasData() ? 'active' : 'waiting';
   const ap = autoPagerPusher ? (autoPagerPusher.isAuthFailed() ? 'auth-failed' : 'active') : 'n/a';
   const qCount = cachedQueues.length;
   const aCount = Array.from(queueAgentCache.values()).reduce((s, a) => s + a.length, 0);
-  console.log(`[Relay] ws=${ws} mon=${mon} polls=${_fastPollCount} pushes=${_pushCount} queues=${qCount} agents=${aCount} autopager=${ap}`);
+  console.log(`[Relay] wallboard=${wb} mon=${mon} polls=${_fastPollCount} pushes=${_pushCount} queues=${qCount} agents=${aCount} autopager=${ap}`);
   _fastPollCount = 0;
   _pushCount = 0;
 }
@@ -347,9 +347,8 @@ function logStatus(): void {
 async function start(): Promise<void> {
   console.log('=== 3CXTools-Relay ===');
   console.log(`PBX: ${config.pbxUrl}`);
-  console.log(`Wallboard WS: ${config.wallboardWsUrl}`);
-  console.log(`Wallboard HTTP: ${config.wallboardUrl} (fallback)`);
-  if (config.autoPagerUrl) console.log(`Auto-Pager: ${config.autoPagerUrl}`);
+  console.log(`Wallboard: ${config.wallboardUrl}/api/relay/push`);
+  if (config.autoPagerUrl) console.log(`Auto-Pager: ${config.autoPagerUrl}/api/relay/push`);
   console.log(`Fast poll: ${config.pollIntervalMs}ms | Users: ${SLOW_USERS_INTERVAL_MS / 1000}s | Queues: ${SLOW_QUEUES_INTERVAL_MS / 1000}s | Agents: ${SLOW_AGENTS_INTERVAL_MS / 1000}s | Report: ${REPORT_API_INTERVAL_MS / 1000}s`);
   console.log(`Log level: ${config.logLevel}`);
   console.log();
@@ -396,10 +395,6 @@ async function start(): Promise<void> {
     console.error('[Relay] Will retry on first poll cycle');
   }
 
-  // Start WebSocket connection to wallboard (non-blocking, auto-reconnects)
-  console.log('[Relay] Connecting to wallboard via WebSocket...');
-  wsClient.connect();
-
   // Start PBX WebSocket queue monitor for event-driven agent login/logout
   console.log('[Relay] Starting PBX queue monitor...');
   monitor.start().catch(err => {
@@ -431,7 +426,6 @@ function shutdown(): void {
     clearTimeout(fastTimer);
     fastTimer = null;
   }
-  wsClient.stop();
   monitor.stop();
   console.log('[Relay] Stopped');
   process.exit(0);
