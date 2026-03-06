@@ -259,9 +259,72 @@
     .text-muted { color: var(--text-muted); }
     .text-right { text-align: right; }
     .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+
+    /* ── Login screen ── */
+    .login-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+    }
+    .login-overlay.hidden { display: none; }
+    .login-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      width: 360px;
+      text-align: center;
+    }
+    .login-box h1 { font-size: 1.25rem; margin-bottom: 4px; }
+    .login-box .subtitle { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 24px; }
+    .login-box .form-group { text-align: left; }
+    .login-box .login-error {
+      color: var(--danger);
+      font-size: 0.8rem;
+      margin-top: 12px;
+      min-height: 1.2em;
+    }
+    .app-container.hidden { display: none; }
+    .logout-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+    .logout-btn:hover { color: var(--text); border-color: var(--text-muted); }
   </style>
 </head>
 <body>
+
+  <!-- Login Screen -->
+  <div class="login-overlay" id="loginOverlay">
+    <div class="login-box">
+      <h1>3CX Auto-Pager</h1>
+      <p class="subtitle">Sign in with your 3CX extension</p>
+      <form onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label>Extension</label>
+          <input type="text" id="login-extension" placeholder="e.g. 0009" autocomplete="username" />
+        </div>
+        <div class="form-group" style="margin-top:12px">
+          <label>Password</label>
+          <input type="password" id="login-password" placeholder="Extension password" autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn btn-primary" id="loginBtn" style="width:100%; margin-top:16px; justify-content:center;">Sign In</button>
+        <div class="login-error" id="loginError"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- App (hidden until logged in) -->
+  <div class="app-container hidden" id="appContainer">
 
   <!-- Header -->
   <div class="header">
@@ -270,6 +333,8 @@
       <span class="badge badge-yellow" id="badgeMonitor">Monitor: --</span>
       <span class="badge badge-yellow" id="badgeAsterisk">Asterisk: --</span>
       <span class="badge badge-yellow" id="badgeAmi">AMI: --</span>
+      <span class="text-xs text-muted" id="loggedInAs" style="margin-left:8px"></span>
+      <button class="logout-btn" onclick="handleLogout()">Logout</button>
     </div>
   </div>
 
@@ -444,6 +509,8 @@
 
   </div>
 
+  </div><!-- /app-container -->
+
 <script>
 // ── State ──
 let currentSettings = {};
@@ -456,11 +523,77 @@ async function api(path, opts = {}) {
     headers: { 'Content-Type': 'application/json', ...opts.headers },
     ...opts,
   });
+  if (res.status === 401 && path !== '/me' && path !== '/login') {
+    showLogin();
+    throw new Error('Session expired');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || res.statusText);
   }
   return res.json();
+}
+
+// ── Auth ──
+function showLogin() {
+  document.getElementById('loginOverlay').classList.remove('hidden');
+  document.getElementById('appContainer').classList.add('hidden');
+}
+
+function showApp(extension) {
+  document.getElementById('loginOverlay').classList.add('hidden');
+  document.getElementById('appContainer').classList.remove('hidden');
+  document.getElementById('loggedInAs').textContent = 'Ext ' + extension;
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const ext = document.getElementById('login-extension').value.trim();
+  const pwd = document.getElementById('login-password').value;
+  const errEl = document.getElementById('loginError');
+  const btn = document.getElementById('loginBtn');
+
+  if (!ext || !pwd) {
+    errEl.textContent = 'Enter extension and password';
+    return;
+  }
+
+  btn.textContent = 'Signing in...';
+  btn.disabled = true;
+  errEl.textContent = '';
+
+  try {
+    const res = await api('/login', {
+      method: 'POST',
+      body: JSON.stringify({ extension: ext, password: pwd }),
+    });
+    showApp(res.extension);
+    initApp();
+  } catch (err) {
+    errEl.textContent = err.message;
+  } finally {
+    btn.textContent = 'Sign In';
+    btn.disabled = false;
+  }
+}
+
+async function handleLogout() {
+  try { await api('/logout', { method: 'POST' }); } catch {}
+  showLogin();
+}
+
+async function checkSession() {
+  try {
+    const res = await api('/me');
+    if (res.authenticated) {
+      showApp(res.extension);
+      initApp();
+    } else {
+      showLogin();
+    }
+  } catch {
+    showLogin();
+  }
 }
 
 function toast(msg, type = 'success') {
@@ -873,7 +1006,11 @@ function esc(str) {
 }
 
 // ── Init ──
-async function init() {
+let appInitialized = false;
+async function initApp() {
+  if (appInitialized) return;
+  appInitialized = true;
+
   await loadSettings();
   await loadWavFiles();
   await loadMonitoredQueues();
@@ -886,7 +1023,8 @@ async function init() {
   setInterval(loadPageLog, 15000);
 }
 
-init();
+// Check if already logged in
+checkSession();
 </script>
 </body>
 </html>

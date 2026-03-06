@@ -4,6 +4,18 @@ export const CONFIG = {
   /** HTTP server port */
   port: parseInt(process.env.PORT || '3001', 10),
 
+  /** Admin extensions allowed to log in (comma-separated from env) */
+  adminExtensions: (process.env.ADMIN_EXTENSIONS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+
+  /** Session cookie name */
+  sessionCookie: 'ap_session',
+
+  /** Session TTL in ms (24 hours) */
+  sessionTtlMs: 24 * 60 * 60 * 1000,
+
   /** Path to SQLite database */
   dbPath: process.env.DB_PATH || '/data/pager.db',
 

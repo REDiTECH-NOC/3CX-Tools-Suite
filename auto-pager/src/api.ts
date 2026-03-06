@@ -3,7 +3,8 @@
  * All routes prefixed with /api.
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import * as crypto from 'crypto';
 import multer from 'multer';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -40,6 +41,66 @@ import {
   getRelayStatus,
   type RelayPushPayload,
 } from './relay-receiver';
+
+// ── Session store (in-memory) ──
+
+interface Session {
+  extension: string;
+  createdAt: number;
+}
+
+const sessions = new Map<string, Session>();
+
+function createSession(extension: string): string {
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, { extension, createdAt: Date.now() });
+  return token;
+}
+
+function getSession(token: string): Session | null {
+  const session = sessions.get(token);
+  if (!session) return null;
+  if (Date.now() - session.createdAt > CONFIG.sessionTtlMs) {
+    sessions.delete(token);
+    return null;
+  }
+  return session;
+}
+
+function destroySession(token: string): void {
+  sessions.delete(token);
+}
+
+function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!cookieHeader) return cookies;
+  for (const pair of cookieHeader.split(';')) {
+    const [key, ...rest] = pair.trim().split('=');
+    if (key) cookies[key] = rest.join('=');
+  }
+  return cookies;
+}
+
+/** Auth middleware — checks session cookie. Skips relay push routes. */
+function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  // Skip auth for login, session check, relay push
+  if (req.path === '/login' || req.path === '/me' || req.path === '/relay/push') {
+    next();
+    return;
+  }
+
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[CONFIG.sessionCookie];
+  const session = token ? getSession(token) : null;
+
+  if (!session) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  (req as Request & { session: Session }).session = session;
+  next();
+}
 
 // Multer storage — save with UUID filenames to /data/audio
 const storage = multer.diskStorage({
@@ -78,6 +139,65 @@ export function createApiRouter(deps: {
   restartServices: () => Promise<void>;
 }): Router {
   const router = Router();
+
+  // Apply auth middleware to all API routes
+  router.use(requireAuth);
+
+  // ── Auth ──
+
+  router.post('/login', async (req: Request, res: Response) => {
+    const { extension, password } = req.body as { extension?: string; password?: string };
+
+    if (!extension || !password) {
+      res.status(400).json({ error: 'Extension and password required' });
+      return;
+    }
+
+    // Check if extension is in the admin list
+    if (CONFIG.adminExtensions.length > 0 && !CONFIG.adminExtensions.includes(extension)) {
+      res.status(403).json({ error: 'Extension not authorized' });
+      return;
+    }
+
+    // Authenticate against 3CX — use stored PBX URL or try the one provided
+    const pbxUrl = getSetting('pbx_url');
+    if (!pbxUrl) {
+      res.status(503).json({ error: '3CX not configured — set PBX URL in settings first' });
+      return;
+    }
+
+    const testClient = new ThreecxClient(pbxUrl, extension, password);
+    const result = await testClient.testConnection();
+
+    if (!result.success) {
+      res.status(401).json({ error: 'Authentication failed: ' + (result.error || 'invalid credentials') });
+      return;
+    }
+
+    // Create session
+    const token = createSession(extension);
+    res.setHeader('Set-Cookie', `${CONFIG.sessionCookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(CONFIG.sessionTtlMs / 1000)}`);
+    res.json({ ok: true, extension });
+  });
+
+  router.post('/logout', (req: Request, res: Response) => {
+    const cookies = parseCookies(req.headers.cookie);
+    const token = cookies[CONFIG.sessionCookie];
+    if (token) destroySession(token);
+    res.setHeader('Set-Cookie', `${CONFIG.sessionCookie}=; Path=/; HttpOnly; Max-Age=0`);
+    res.json({ ok: true });
+  });
+
+  router.get('/me', (req: Request, res: Response) => {
+    const cookies = parseCookies(req.headers.cookie);
+    const token = cookies[CONFIG.sessionCookie];
+    const session = token ? getSession(token) : null;
+    if (session) {
+      res.json({ authenticated: true, extension: session.extension });
+    } else {
+      res.json({ authenticated: false });
+    }
+  });
 
   // ── Settings ──
 

@@ -61,6 +61,8 @@ services:
     container_name: 3cx-auto-pager
     restart: unless-stopped
     network_mode: host
+    environment:
+      - ADMIN_EXTENSIONS=${ADMIN_EXTENSIONS:-}
     volumes:
       - pager-data:/data
 
