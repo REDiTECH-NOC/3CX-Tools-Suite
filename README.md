@@ -125,6 +125,20 @@ sudo ./install.sh \
 
 ---
 
+## Quick Reference — Relay Agent Install / Uninstall
+
+```bash
+# Install (interactive — run on the PBX)
+curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/install.sh | sudo bash
+
+# Uninstall (removes everything — run on the PBX)
+curl -sSL https://raw.githubusercontent.com/REDiTECH-NOC/3CX-Tools-Suite/main/relay-agent/uninstall.sh | sudo bash
+```
+
+> **Need 3CX support?** Run the uninstall command above before granting access. It cleanly removes the service, code, and config. Node.js is left in place. Re-install afterward with the install command.
+
+---
+
 ## Relay Agent Management
 
 The relay agent runs as a systemd service called `3cx-relay`.
