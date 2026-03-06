@@ -4,7 +4,7 @@ import { decrypt } from '@/lib/crypto';
 import { ThreecxClient } from '@/lib/threecx-client';
 import { pruneOldSnapshots } from '@/lib/snapshot-pruning';
 import { ThreecxQueueMonitor } from '@/lib/threecx-queue-monitor';
-import { isRelayFresh, getRelayData, getRelayAge, onRelayData, offRelayData, getAgentOverride } from '@/lib/relay-store';
+import { isRelayFresh, getRelayData, getRelayAge, onRelayData, offRelayData, getAgentOverride, getMembershipOverride, getAddedMembershipOverrides } from '@/lib/relay-store';
 import type { RelayPushPayload } from '@/types/relay';
 import type {
   ThreecxQueue,
@@ -632,10 +632,34 @@ class ThreecxPoller {
             : 0;
 
           // Agent statuses from relay (enrich with cached manager data)
+          // Apply membership overrides: filter removed agents, inject added agents
           const cachedManagers = this._cachedManagersByQueue.get(vq.queueId) ?? [];
           const managerExtSet = new Set(cachedManagers.map((m) => m.Number));
-          const agentStatuses: QueueAgentStatus[] = rq.agents.map((ra) => {
-            // Optimistic override: if a queue action just happened, use the override
+
+          // Filter out agents with a "remove" membership override
+          const filteredAgents = rq.agents.filter((ra) => {
+            const memberOverride = getMembershipOverride(vq.queueNumber, ra.ext);
+            return memberOverride !== false; // keep unless explicitly removed
+          });
+
+          // Inject agents with an "add" membership override not yet in relay data
+          const existingExts = new Set(filteredAgents.map(a => a.ext));
+          const addedOverrides = getAddedMembershipOverrides(vq.queueNumber);
+          for (const added of addedOverrides) {
+            if (!existingExts.has(added.ext)) {
+              filteredAgents.push({
+                ext: added.ext,
+                name: added.ext, // Best we can do without user data
+                loggedIn: true,
+                callState: 'available' as const,
+                profileName: 'Unknown',
+                isRegistered: true,
+              });
+            }
+          }
+
+          const agentStatuses: QueueAgentStatus[] = filteredAgents.map((ra) => {
+            // Optimistic login/logout override
             const override = getAgentOverride(vq.queueNumber, ra.ext);
             const loggedIn = override ?? ra.loggedIn;
             return {
@@ -650,7 +674,7 @@ class ThreecxPoller {
           });
 
           const agentsLoggedIn = agentStatuses.filter((a) => a.queueStatus === 'LoggedIn').length;
-          const agentsTalking = rq.agents.filter((a) => a.callState === 'talking').length;
+          const agentsTalking = filteredAgents.filter((a) => a.callState === 'talking').length;
 
           return {
             queueId: vq.queueId,
@@ -659,7 +683,7 @@ class ThreecxPoller {
             callsWaiting,
             longestWaitSec,
             agentsLoggedIn,
-            agentsTotal: rq.agents.length,
+            agentsTotal: filteredAgents.length,
             agentsTalking,
             agentsAvailable: Math.max(0, agentsLoggedIn - agentsTalking),
             callsAnswered,

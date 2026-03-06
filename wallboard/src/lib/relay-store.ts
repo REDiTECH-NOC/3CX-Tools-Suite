@@ -125,16 +125,70 @@ function pruneConfirmedOverrides(payload: RelayPushPayload): void {
   const now = Date.now();
   for (let i = _agentOverrides.length - 1; i >= 0; i--) {
     const o = _agentOverrides[i];
-    // Expired — remove regardless
     if (o.expiresAt < now) { _agentOverrides.splice(i, 1); continue; }
-    // Check if relay data now matches the override
     const queue = payload.queues.find(q => q.number === o.queueNumber);
     if (queue) {
       const agent = queue.agents.find(a => a.ext === o.ext);
       if (agent && agent.loggedIn === o.loggedIn) {
-        // Relay confirmed the change — override no longer needed
         _agentOverrides.splice(i, 1);
       }
     }
   }
+  // Prune membership overrides
+  for (let i = _membershipOverrides.length - 1; i >= 0; i--) {
+    const o = _membershipOverrides[i];
+    if (o.expiresAt < now) { _membershipOverrides.splice(i, 1); continue; }
+    const queue = payload.queues.find(q => q.number === o.queueNumber);
+    if (queue) {
+      const inList = queue.agents.some(a => a.ext === o.ext);
+      if (inList === o.present) {
+        // Relay confirmed the membership change
+        _membershipOverrides.splice(i, 1);
+      }
+    }
+  }
+}
+
+// ─── Membership overrides (add/remove agent from queue) ─────────────────
+
+interface MembershipOverride {
+  queueNumber: string;
+  ext: string;
+  present: boolean; // true = should appear in queue, false = should not
+  expiresAt: number;
+}
+
+const _membershipOverrides: MembershipOverride[] = [];
+
+/**
+ * Optimistic override for agent membership (add/remove from queue).
+ * The relay polls membership every 10s — this provides instant UI feedback.
+ */
+export function setMembershipOverride(queueNumber: string, ext: string, present: boolean): void {
+  const idx = _membershipOverrides.findIndex(o => o.queueNumber === queueNumber && o.ext === ext);
+  if (idx >= 0) _membershipOverrides.splice(idx, 1);
+  _membershipOverrides.push({ queueNumber, ext, present, expiresAt: Date.now() + 20_000 });
+}
+
+/**
+ * Get membership override for an agent, or undefined if none.
+ */
+export function getMembershipOverride(queueNumber: string, ext: string): boolean | undefined {
+  const now = Date.now();
+  for (let i = _membershipOverrides.length - 1; i >= 0; i--) {
+    if (_membershipOverrides[i].expiresAt < now) _membershipOverrides.splice(i, 1);
+  }
+  const o = _membershipOverrides.find(o => o.queueNumber === queueNumber && o.ext === ext);
+  return o?.present;
+}
+
+/**
+ * Get all membership overrides that ADD agents to a specific queue.
+ * Used by the poller to inject agents not yet in relay data.
+ */
+export function getAddedMembershipOverrides(queueNumber: string): { ext: string }[] {
+  const now = Date.now();
+  return _membershipOverrides.filter(o =>
+    o.queueNumber === queueNumber && o.present && o.expiresAt > now
+  ).map(o => ({ ext: o.ext }));
 }

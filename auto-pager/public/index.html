@@ -363,7 +363,7 @@
       </div>
       <div class="card">
         <div class="flex justify-between items-center mb-2">
-          <h2>Active Calls in Monitored Queues</h2>
+          <h2>Queue Status</h2>
         </div>
         <div id="trackedCallsList">
           <div class="empty-state">No calls currently waiting in monitored queues</div>
@@ -810,16 +810,16 @@ async function loadStatus() {
       </div>
     `;
 
-    // Tracked calls
+    // Queue status
     const tc = document.getElementById('trackedCallsList');
-    if (status.trackedCalls && status.trackedCalls.length > 0) {
+    if (status.queueStatus && status.queueStatus.length > 0) {
       tc.innerHTML = `<table>
-        <thead><tr><th>Queue</th><th>Caller</th><th>Waiting</th></tr></thead>
-        <tbody>${status.trackedCalls.map(c => `
+        <thead><tr><th>Queue</th><th>Calls Waiting</th><th>Timer</th></tr></thead>
+        <tbody>${status.queueStatus.map(q => `
           <tr>
-            <td>${c.queueNumber}</td>
-            <td>${c.callerNumber}</td>
-            <td>${c.waitSeconds}s</td>
+            <td>${q.queueNumber}</td>
+            <td>${q.callsWaiting}</td>
+            <td>${q.waitingSince}s</td>
           </tr>
         `).join('')}</tbody>
       </table>`;

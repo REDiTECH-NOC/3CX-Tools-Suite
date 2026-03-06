@@ -1,8 +1,13 @@
 /**
- * Queue Monitor — polls 3CX ActiveCalls and detects queue conditions
- * that warrant paging. Evaluates per-queue thresholds (max wait time,
- * min calls waiting) and repeats pages at a configurable frequency
- * until the queue drops below the calls threshold.
+ * Queue Monitor — detects when calls are waiting in monitored queues
+ * and triggers paging. Uses a simple queue-level timer:
+ *
+ *   Queue goes 0→1+ calls:  start timer
+ *   Timer hits threshold:   PAGE (first)
+ *   Repeat interval:        PAGE again (while calls > 0)
+ *   Queue goes back to 0:   stop timer, reset
+ *
+ * Does NOT track individual calls or their wait times.
  */
 
 import { EventEmitter } from 'events';
@@ -14,35 +19,29 @@ import {
   WavFile,
   getDb,
 } from './db';
-import { isRelayFresh, getRelayData, onRelayPush, offRelayPush, type RelayQueueData, type RelayPushPayload } from './relay-receiver';
+import { isRelayFresh, getRelayData, onRelayPush, offRelayPush, type RelayPushPayload } from './relay-receiver';
 
 export interface PageEvent {
   queueNumber: string;
   queueName: string;
   callsWaiting: number;
-  longestWaitSeconds: number;
+  longestWaitSeconds: number; // seconds since queue went from 0→1+
   wavFile: WavFile | null;
   pagingExtension: string;
   playCount: number;
 }
 
-interface TrackedCall {
-  callId: number;
-  queueNumber: string;
-  callerNumber: string;
-  firstSeen: number; // Date.now()
-}
-
-/** Per-queue paging state — tracks when we last paged (in memory, not just DB). */
-interface QueuePagingState {
-  lastPagedAt: number; // Date.now() of last page emission
+/** Per-queue state: tracks when calls first appeared and when we last paged. */
+interface QueueState {
+  callsWaitingSince: number; // Date.now() when queue went from 0→1+
+  lastPagedAt: number;       // Date.now() of last page emission (0 = never paged)
+  callsWaiting: number;      // current count
 }
 
 export class QueueMonitor extends EventEmitter {
   private client: ThreecxClient;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private trackedCalls = new Map<number, TrackedCall>();
-  private queuePagingState = new Map<string, QueuePagingState>();
+  private queueState = new Map<string, QueueState>();
   private running = false;
   private pollCount = 0;
   private _lastRelayMode = false;
@@ -94,8 +93,7 @@ export class QueueMonitor extends EventEmitter {
       offRelayPush(this._relayHandler);
       this._relayHandler = null;
     }
-    this.trackedCalls.clear();
-    this.queuePagingState.clear();
+    this.queueState.clear();
     console.log('[QueueMonitor] Stopped');
   }
 
@@ -103,18 +101,17 @@ export class QueueMonitor extends EventEmitter {
     return this.running;
   }
 
-  /** Get current status of tracked calls waiting in queues. */
+  /** Get current status of monitored queues for the UI. */
   getStatus(): {
-    trackedCalls: { callId: number; queueNumber: string; callerNumber: string; waitSeconds: number }[];
+    queues: { queueNumber: string; callsWaiting: number; waitingSince: number }[];
   } {
     const now = Date.now();
-    const calls = Array.from(this.trackedCalls.values()).map((tc) => ({
-      callId: tc.callId,
-      queueNumber: tc.queueNumber,
-      callerNumber: tc.callerNumber,
-      waitSeconds: Math.round((now - tc.firstSeen) / 1000),
+    const queues = Array.from(this.queueState.entries()).map(([queueNumber, state]) => ({
+      queueNumber,
+      callsWaiting: state.callsWaiting,
+      waitingSince: Math.round((now - state.callsWaitingSince) / 1000),
     }));
-    return { trackedCalls: calls };
+    return { queues };
   }
 
   private async poll(): Promise<void> {
@@ -148,48 +145,27 @@ export class QueueMonitor extends EventEmitter {
     }
 
     const now = Date.now();
-    const queueStats = new Map<string, { waitingCount: number; longestWaitSec: number }>();
+    // queueNumber → calls waiting count
+    const callCounts = new Map<string, number>();
 
     if (relayFresh) {
-      // ── Relay mode: build stats from relay payload ──
+      // ── Relay mode: get call counts from relay payload ──
       const relayData = getRelayData();
       if (relayData) {
         for (const rq of relayData.queues) {
           if (!queueMap.has(rq.number)) continue;
-          queueStats.set(rq.number, {
-            waitingCount: rq.callsWaiting,
-            longestWaitSec: rq.longestWaitSec,
-          });
-
-          // Update tracked calls from relay's queued calls (for getStatus())
-          for (const rc of (rq.queuedCalls ?? [])) {
-            if (!this.trackedCalls.has(rc.id)) {
-              this.trackedCalls.set(rc.id, {
-                callId: rc.id,
-                queueNumber: rq.number,
-                callerNumber: rc.caller,
-                firstSeen: now - (rc.waitSec * 1000),
-              });
-            }
-          }
-          // Remove tracked calls that are no longer in relay data for this queue
-          const relayCallIds = new Set((rq.queuedCalls ?? []).map(c => c.id));
-          for (const [callId, tc] of this.trackedCalls) {
-            if (tc.queueNumber === rq.number && !relayCallIds.has(callId)) {
-              this.trackedCalls.delete(callId);
-            }
-          }
+          callCounts.set(rq.number, rq.callsWaiting);
         }
 
         if (this.pollCount % 12 === 1) {
-          const totalWaiting = Array.from(queueStats.values()).reduce((s, q) => s + q.waitingCount, 0);
+          const totalWaiting = Array.from(callCounts.values()).reduce((s, c) => s + c, 0);
           console.log(
             `[QueueMonitor] Relay poll #${this.pollCount} — ${relayData.queues.length} queues, ${totalWaiting} total waiting`,
           );
         }
       }
     } else {
-      // ── Polling mode: fetch from PBX API ──
+      // ── Polling mode: count calls per queue from PBX API ──
       let activeCalls: ThreecxActiveCall[];
       try {
         activeCalls = await this.client.getActiveCalls();
@@ -198,149 +174,106 @@ export class QueueMonitor extends EventEmitter {
         return;
       }
 
-      // Debug: log every 12th poll (~60s) or whenever there are active calls
-      const shouldLog = activeCalls.length > 0 || this.pollCount % 12 === 1;
-      if (shouldLog) {
+      if (this.pollCount % 12 === 1) {
         console.log(
           `[QueueMonitor] Poll #${this.pollCount} — ${activeCalls.length} active call(s), ` +
           `monitoring queues: [${Array.from(queueMap.keys()).join(', ')}]`,
         );
       }
 
-      // Debug: dump active calls
-      if (activeCalls.length > 0) {
-        if (this.pollCount <= 3 || this.pollCount % 60 === 1) {
-          console.log(`[QueueMonitor] RAW ActiveCall[0]: ${JSON.stringify(activeCalls[0], null, 2)}`);
-        }
-        for (const call of activeCalls) {
-          const segInfo = call.Segments
-            ? call.Segments.map((s) =>
-              `{Dn:${s.Dn},DialedDn:${s.DialedDn},CalleeNum:${s.CalleeNumber},Status:${s.Status}}`
-            ).join(', ')
-            : 'none';
-          console.log(
-            `[QueueMonitor]   Call #${call.Id}: Caller=${call.Caller}, Callee=${call.Callee}, ` +
-            `Status=${call.Status}, Segments=[${segInfo}]`,
-          );
-        }
-      }
-
-      const seenCallIds = new Set<number>();
-
       for (const call of activeCalls) {
         const queueNumber = this.findQueueForCall(call, queueMap);
         if (!queueNumber) continue;
-
-        // Skip connected calls — only count those still waiting
         if (this.isCallConnected(call, queueMap)) continue;
-
-        seenCallIds.add(call.Id);
-
-        // Track when we first saw this call
-        let tracked = this.trackedCalls.get(call.Id);
-        if (!tracked) {
-          tracked = {
-            callId: call.Id,
-            queueNumber,
-            callerNumber: call.Caller,
-            firstSeen: now,
-          };
-          this.trackedCalls.set(call.Id, tracked);
-        }
-
-        const waitSec = (now - tracked.firstSeen) / 1000;
-
-        // Accumulate per-queue stats
-        const stats = queueStats.get(queueNumber) || { waitingCount: 0, longestWaitSec: 0 };
-        stats.waitingCount++;
-        stats.longestWaitSec = Math.max(stats.longestWaitSec, waitSec);
-        queueStats.set(queueNumber, stats);
-      }
-
-      // Clean up calls that are no longer active
-      for (const [callId] of this.trackedCalls) {
-        if (!seenCallIds.has(callId)) {
-          this.trackedCalls.delete(callId);
-        }
+        callCounts.set(queueNumber, (callCounts.get(queueNumber) || 0) + 1);
       }
     }
 
-    // ── Evaluate each monitored queue for paging ──
+    // ── Evaluate each monitored queue ──
     for (const [queueNumber, queue] of queueMap) {
-      const stats = queueStats.get(queueNumber);
-      const waitingCount = stats?.waitingCount || 0;
-      const longestWaitSec = stats?.longestWaitSec || 0;
-      const minCalls = queue.min_calls || 1;
+      const callsWaiting = callCounts.get(queueNumber) || 0;
+      const state = this.queueState.get(queueNumber);
 
-      // Log queue state when there are calls
-      if (waitingCount > 0) {
-        console.log(
-          `[QueueMonitor] Queue ${queue.queue_name} (${queueNumber}): ` +
-          `${waitingCount} waiting, longest ${Math.round(longestWaitSec)}s — ` +
-          `thresholds: ${queue.threshold_seconds}s wait, ${minCalls} calls`,
-        );
-      }
-
-      // Check if both conditions are met
-      const waitMet = longestWaitSec >= queue.threshold_seconds;
-      const callsMet = waitingCount >= minCalls;
-
-      if (!waitMet || !callsMet) {
-        // If queue drops below min_calls threshold, clear its paging state
-        // so the next breach starts fresh
-        if (!callsMet && this.queuePagingState.has(queueNumber)) {
+      if (callsWaiting === 0) {
+        // Queue is empty — reset state
+        if (state) {
           console.log(
-            `[QueueMonitor] Queue ${queueNumber} dropped below min calls (${waitingCount}/${minCalls}) — resetting page state`,
+            `[QueueMonitor] Queue ${queue.queue_name} (${queueNumber}): back to 0 — timer reset`,
           );
-          this.queuePagingState.delete(queueNumber);
+          this.queueState.delete(queueNumber);
         }
         continue;
       }
 
-      // Both conditions met — check if we should page (first time or repeat interval)
-      const pagingState = this.queuePagingState.get(queueNumber);
-      const repeatInterval = queue.repeat_interval_seconds || 0;
-
-      if (pagingState) {
-        // Already paged before — check repeat interval
-        if (repeatInterval <= 0) {
-          // No repeat — already paged once, skip
-          continue;
-        }
-        const secsSinceLastPage = (now - pagingState.lastPagedAt) / 1000;
-        if (secsSinceLastPage < repeatInterval) {
-          // Not time to repeat yet
-          continue;
-        }
+      // Calls are waiting
+      if (!state) {
+        // Queue just went from 0→1+ — start timer
         console.log(
-          `[QueueMonitor] Queue ${queueNumber} — repeat interval reached (${Math.round(secsSinceLastPage)}s >= ${repeatInterval}s)`,
+          `[QueueMonitor] Queue ${queue.queue_name} (${queueNumber}): ${callsWaiting} waiting — timer started`,
         );
+        this.queueState.set(queueNumber, {
+          callsWaitingSince: now,
+          lastPagedAt: 0,
+          callsWaiting,
+        });
+        continue; // Don't page yet — timer just started
       }
 
-      // ── Trigger page ──
-      const wavFile = queue.wav_file_id ? this.getWavFile(queue.wav_file_id) : null;
+      // Update current count
+      state.callsWaiting = callsWaiting;
 
-      const event: PageEvent = {
-        queueNumber: queue.queue_number,
-        queueName: queue.queue_name,
-        callsWaiting: waitingCount,
-        longestWaitSeconds: Math.round(longestWaitSec),
-        wavFile,
-        pagingExtension: queue.paging_extension!,
-        playCount: queue.play_count || 1,
-      };
+      const waitingSec = (now - state.callsWaitingSince) / 1000;
 
-      console.log(
-        `[QueueMonitor] >>> PAGE — queue ${queue.queue_name} (${queueNumber}), ` +
-        `${waitingCount} calls waiting, longest ${Math.round(longestWaitSec)}s — ` +
-        `${pagingState ? 'REPEAT' : 'FIRST'} page`,
-      );
+      // Check if we've waited long enough for initial page
+      if (waitingSec < queue.threshold_seconds) {
+        continue; // Not time yet
+      }
 
-      // Update in-memory paging state
-      this.queuePagingState.set(queueNumber, { lastPagedAt: now });
+      // Threshold met — check if we should page
+      if (state.lastPagedAt === 0) {
+        // First page
+        this.triggerPage(queue, callsWaiting, waitingSec, state, now, 'FIRST');
+        continue;
+      }
 
-      this.emit('page', event);
+      // Check repeat interval
+      const repeatInterval = queue.repeat_interval_seconds || 0;
+      if (repeatInterval <= 0) continue; // No repeat configured
+
+      const secsSinceLastPage = (now - state.lastPagedAt) / 1000;
+      if (secsSinceLastPage >= repeatInterval) {
+        this.triggerPage(queue, callsWaiting, waitingSec, state, now, 'REPEAT');
+      }
     }
+  }
+
+  private triggerPage(
+    queue: MonitoredQueue,
+    callsWaiting: number,
+    waitingSec: number,
+    state: QueueState,
+    now: number,
+    type: 'FIRST' | 'REPEAT',
+  ): void {
+    const wavFile = queue.wav_file_id ? this.getWavFile(queue.wav_file_id) : null;
+
+    const event: PageEvent = {
+      queueNumber: queue.queue_number,
+      queueName: queue.queue_name,
+      callsWaiting,
+      longestWaitSeconds: Math.round(waitingSec),
+      wavFile,
+      pagingExtension: queue.paging_extension!,
+      playCount: queue.play_count || 1,
+    };
+
+    console.log(
+      `[QueueMonitor] >>> PAGE — queue ${queue.queue_name} (${queue.queue_number}), ` +
+      `${callsWaiting} calls waiting, timer at ${Math.round(waitingSec)}s — ${type} page`,
+    );
+
+    state.lastPagedAt = now;
+    this.emit('page', event);
   }
 
   /**
@@ -351,15 +284,12 @@ export class QueueMonitor extends EventEmitter {
     call: ThreecxActiveCall,
     queueMap: Map<string, MonitoredQueue>,
   ): string | null {
-    // Check if the Callee matches a queue number directly
     if (queueMap.has(call.Callee)) return call.Callee;
 
-    // 3CX returns Callee as "8003 Queue 1" — check if it starts with a queue number
     for (const queueNumber of queueMap.keys()) {
       if (call.Callee?.startsWith(queueNumber + ' ')) return queueNumber;
     }
 
-    // Check segments for queue numbers
     if (call.Segments) {
       for (const seg of call.Segments) {
         if (seg.DialedDn && queueMap.has(seg.DialedDn)) return seg.DialedDn;
@@ -373,15 +303,12 @@ export class QueueMonitor extends EventEmitter {
 
   /**
    * Check if a call has been answered/connected to an agent.
-   * IMPORTANT: "Talking" to a queue number means the caller is hearing
-   * hold music — NOT that an agent answered. Must check the Callee.
+   * "Talking" to a queue number means hold music — NOT answered.
    */
   private isCallConnected(call: ThreecxActiveCall, queueMap: Map<string, MonitoredQueue>): boolean {
     const status = call.Status?.toLowerCase() || '';
 
     if (status === 'talking' || status === 'connected') {
-      // If the Callee IS a queue number (or starts with one), this is
-      // a caller hearing hold music — not an answered call
       const calleeExt = call.Callee?.split(' ')[0] ?? '';
       if (queueMap.has(calleeExt)) return false;
       if (queueMap.has(call.Callee)) return false;

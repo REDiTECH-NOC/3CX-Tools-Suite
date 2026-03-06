@@ -388,7 +388,7 @@ export function createApiRouter(deps: {
       asteriskRunning,
       sipRegistration,
       amiConnected: deps.pager?.isConnected() || false,
-      trackedCalls: deps.queueMonitor?.getStatus().trackedCalls || [],
+      queueStatus: deps.queueMonitor?.getStatus().queues || [],
       relay: getRelayStatus(),
       settings: {
         pbxUrl: getSetting('pbx_url') || '',

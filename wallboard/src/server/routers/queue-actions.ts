@@ -4,7 +4,7 @@ import { router, protectedProcedure, adminProcedure } from '../trpc';
 import { ThreecxClient } from '@/lib/threecx-client';
 import { decrypt } from '@/lib/crypto';
 import { poller } from '@/lib/threecx-poller';
-import { setAgentOverride } from '@/lib/relay-store';
+import { setAgentOverride, setMembershipOverride } from '@/lib/relay-store';
 
 /**
  * Creates a ThreecxClient using the system owner credentials from SystemConfig.
@@ -255,6 +255,8 @@ export const queueActionsRouter = router({
           message: `Failed to join queue: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
+      const q = await ctx.prisma.wallboardQueue.findUnique({ where: { queueId: input.queueId }, select: { queueNumber: true } });
+      if (q) setMembershipOverride(q.queueNumber, ctx.user.extensionNumber, true);
       poller.forcePoll();
       return { success: true };
     }),
@@ -275,6 +277,8 @@ export const queueActionsRouter = router({
           message: `Failed to leave queue: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
+      const q = await ctx.prisma.wallboardQueue.findUnique({ where: { queueId: input.queueId }, select: { queueNumber: true } });
+      if (q) setMembershipOverride(q.queueNumber, ctx.user.extensionNumber, false);
       poller.forcePoll();
       return { success: true };
     }),
@@ -297,6 +301,8 @@ export const queueActionsRouter = router({
           message: `Failed to add agent ${input.extensionNumber}: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
+      const q = await ctx.prisma.wallboardQueue.findUnique({ where: { queueId: input.queueId }, select: { queueNumber: true } });
+      if (q) setMembershipOverride(q.queueNumber, input.extensionNumber, true);
       poller.forcePoll();
       return { success: true };
     }),
@@ -319,6 +325,8 @@ export const queueActionsRouter = router({
           message: `Failed to remove agent ${input.extensionNumber}: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
+      const q = await ctx.prisma.wallboardQueue.findUnique({ where: { queueId: input.queueId }, select: { queueNumber: true } });
+      if (q) setMembershipOverride(q.queueNumber, input.extensionNumber, false);
       poller.forcePoll();
       return { success: true };
     }),

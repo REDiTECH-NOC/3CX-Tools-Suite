@@ -76,7 +76,7 @@ async function startServices(): Promise<void> {
     queueMonitor.on('page', (event: PageEvent) => {
       console.log(
         `[Main] Page would be triggered for queue ${event.queueName} ` +
-        `(${event.queueNumber}) — ${event.callsWaiting} calls, longest ${event.longestWaitSeconds}s — ` +
+        `(${event.queueNumber}) — ${event.callsWaiting} calls, timer at ${event.longestWaitSeconds}s — ` +
         `but SIP/paging not configured`,
       );
     });
