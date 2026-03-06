@@ -39,6 +39,8 @@ export function setRelayData(payload: RelayPushPayload, ip?: string): void {
   _data = payload;
   _receivedAt = Date.now();
   if (ip) _relayIp = ip;
+  // Fresh relay data supersedes optimistic overrides
+  clearAgentOverrides();
   _emitter.emit('data', payload);
 }
 
@@ -72,4 +74,45 @@ export function getRelayIp(): string | null {
 /** Get the timestamp when relay data was last received. */
 export function getRelayReceivedAt(): number {
   return _receivedAt;
+}
+
+// ─── Optimistic overrides (for immediate UI updates after actions) ─────
+
+interface AgentOverride {
+  queueNumber: string;
+  ext: string;
+  loggedIn: boolean;
+  expiresAt: number;
+}
+
+const _agentOverrides: AgentOverride[] = [];
+
+/**
+ * Apply an optimistic override to an agent's login status.
+ * The next relay push or 10s timeout clears it automatically.
+ */
+export function setAgentOverride(queueNumber: string, ext: string, loggedIn: boolean): void {
+  // Remove any existing override for the same agent+queue
+  const idx = _agentOverrides.findIndex(o => o.queueNumber === queueNumber && o.ext === ext);
+  if (idx >= 0) _agentOverrides.splice(idx, 1);
+  _agentOverrides.push({ queueNumber, ext, loggedIn, expiresAt: Date.now() + 10_000 });
+}
+
+/**
+ * Get optimistic login override for an agent, or undefined if none.
+ * Automatically prunes expired overrides.
+ */
+export function getAgentOverride(queueNumber: string, ext: string): boolean | undefined {
+  const now = Date.now();
+  // Prune expired
+  for (let i = _agentOverrides.length - 1; i >= 0; i--) {
+    if (_agentOverrides[i].expiresAt < now) _agentOverrides.splice(i, 1);
+  }
+  const o = _agentOverrides.find(o => o.queueNumber === queueNumber && o.ext === ext);
+  return o?.loggedIn;
+}
+
+/** Clear all overrides (called when fresh relay data arrives). */
+export function clearAgentOverrides(): void {
+  _agentOverrides.length = 0;
 }

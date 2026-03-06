@@ -4,7 +4,7 @@ import { decrypt } from '@/lib/crypto';
 import { ThreecxClient } from '@/lib/threecx-client';
 import { pruneOldSnapshots } from '@/lib/snapshot-pruning';
 import { ThreecxQueueMonitor } from '@/lib/threecx-queue-monitor';
-import { isRelayFresh, getRelayData, getRelayAge, onRelayData, offRelayData } from '@/lib/relay-store';
+import { isRelayFresh, getRelayData, getRelayAge, onRelayData, offRelayData, getAgentOverride } from '@/lib/relay-store';
 import type { RelayPushPayload } from '@/types/relay';
 import type {
   ThreecxQueue,
@@ -634,17 +634,22 @@ class ThreecxPoller {
           // Agent statuses from relay (enrich with cached manager data)
           const cachedManagers = this._cachedManagersByQueue.get(vq.queueId) ?? [];
           const managerExtSet = new Set(cachedManagers.map((m) => m.Number));
-          const agentStatuses: QueueAgentStatus[] = rq.agents.map((ra) => ({
-            extensionNumber: ra.ext,
-            displayName: ra.name,
-            queueStatus: ra.loggedIn ? 'LoggedIn' as const : 'LoggedOut' as const,
-            callState: ra.callState,
-            profileName: ra.profileName,
-            isRegistered: ra.isRegistered,
-            isManager: managerExtSet.has(ra.ext),
-          }));
+          const agentStatuses: QueueAgentStatus[] = rq.agents.map((ra) => {
+            // Optimistic override: if a queue action just happened, use the override
+            const override = getAgentOverride(vq.queueNumber, ra.ext);
+            const loggedIn = override ?? ra.loggedIn;
+            return {
+              extensionNumber: ra.ext,
+              displayName: ra.name,
+              queueStatus: loggedIn ? 'LoggedIn' as const : 'LoggedOut' as const,
+              callState: ra.callState,
+              profileName: ra.profileName,
+              isRegistered: ra.isRegistered,
+              isManager: managerExtSet.has(ra.ext),
+            };
+          });
 
-          const agentsLoggedIn = rq.agents.filter((a) => a.loggedIn).length;
+          const agentsLoggedIn = agentStatuses.filter((a) => a.queueStatus === 'LoggedIn').length;
           const agentsTalking = rq.agents.filter((a) => a.callState === 'talking').length;
 
           return {

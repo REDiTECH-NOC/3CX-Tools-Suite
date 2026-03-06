@@ -4,6 +4,7 @@ import { router, protectedProcedure, adminProcedure } from '../trpc';
 import { ThreecxClient } from '@/lib/threecx-client';
 import { decrypt } from '@/lib/crypto';
 import { poller } from '@/lib/threecx-poller';
+import { setAgentOverride } from '@/lib/relay-store';
 
 /**
  * Creates a ThreecxClient using the system owner credentials from SystemConfig.
@@ -47,7 +48,9 @@ export const queueActionsRouter = router({
         });
       }
 
-      // Trigger immediate poll so SSE clients see the change right away
+      // Optimistic override so UI updates immediately (relay may take 30s)
+      const q = await ctx.prisma.wallboardQueue.findUnique({ where: { queueId: input.queueId }, select: { queueNumber: true } });
+      if (q) setAgentOverride(q.queueNumber, ctx.user.extensionNumber, true);
       poller.forcePoll();
       return { success: true };
     }),
@@ -74,7 +77,8 @@ export const queueActionsRouter = router({
         });
       }
 
-      // Trigger immediate poll so SSE clients see the change right away
+      const q = await ctx.prisma.wallboardQueue.findUnique({ where: { queueId: input.queueId }, select: { queueNumber: true } });
+      if (q) setAgentOverride(q.queueNumber, ctx.user.extensionNumber, false);
       poller.forcePoll();
       return { success: true };
     }),
@@ -115,7 +119,8 @@ export const queueActionsRouter = router({
         });
       }
 
-      // Trigger immediate poll so SSE clients see the change right away
+      const q = await ctx.prisma.wallboardQueue.findUnique({ where: { queueId: input.queueId }, select: { queueNumber: true } });
+      if (q) setAgentOverride(q.queueNumber, input.targetExtensionNumber, true);
       poller.forcePoll();
       return { success: true };
     }),
@@ -156,7 +161,8 @@ export const queueActionsRouter = router({
         });
       }
 
-      // Trigger immediate poll so SSE clients see the change right away
+      const q = await ctx.prisma.wallboardQueue.findUnique({ where: { queueId: input.queueId }, select: { queueNumber: true } });
+      if (q) setAgentOverride(q.queueNumber, input.targetExtensionNumber, false);
       poller.forcePoll();
       return { success: true };
     }),
