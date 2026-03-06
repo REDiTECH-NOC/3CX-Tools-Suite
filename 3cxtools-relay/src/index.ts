@@ -273,6 +273,18 @@ async function fastPoll(): Promise<void> {
     // FAST: Only fetch active calls every cycle
     const activeCalls = await collector.getActiveCalls();
 
+    // DEBUG: Log raw ActiveCalls when there are any (helps diagnose queue matching)
+    if (activeCalls.length > 0 && (config.logLevel === 'debug' || _fastPollCount % 40 === 0)) {
+      for (const call of activeCalls) {
+        console.log(`[DEBUG] ActiveCall id=${call.Id} caller=${call.Caller} callee=${call.Callee} status=${call.Status} segments=${call.Segments?.length ?? 0}`);
+        if (call.Segments) {
+          for (const seg of call.Segments) {
+            console.log(`[DEBUG]   Seg dn=${seg.Dn} dialedDn=${seg.DialedDn} callerNum=${seg.CallerNumber} calleeNum=${seg.CalleeNumber} status=${seg.Status}`);
+          }
+        }
+      }
+    }
+
     const serverNow = activeCalls.length > 0 && activeCalls[0].ServerNow
       ? new Date(activeCalls[0].ServerNow)
       : new Date();
