@@ -56,6 +56,8 @@ interface QueueGridProps {
   // Manager agent management
   currentUserExtension: string | null;
   currentUserRole: string | null;
+  // Dynamic column labels
+  avgWaitWindowMinutes?: number;
 }
 
 /**
@@ -130,6 +132,7 @@ export function QueueGrid({
   onWatchColumnChange,
   currentUserExtension,
   currentUserRole,
+  avgWaitWindowMinutes,
 }: QueueGridProps) {
   // ── Sensors for dnd-kit ─────────────────────────────────────────────
   const sensors = useSensors(
@@ -141,11 +144,25 @@ export function QueueGrid({
   const visibleSet = useMemo(() => new Set(visibleColumns), [visibleColumns]);
 
   const columns = useMemo(() => {
+    // Build dynamic window label for Avg Wait column (e.g., "1hr", "3hr", "30m")
+    const windowLabel = avgWaitWindowMinutes
+      ? avgWaitWindowMinutes >= 60
+        ? `${avgWaitWindowMinutes / 60}hr`
+        : `${avgWaitWindowMinutes}m`
+      : 'Window';
     return columnOrder
       .filter((key) => visibleSet.has(key))
-      .map((key) => COLUMN_DEFINITIONS.find((def) => def.key === key))
+      .map((key) => {
+        const def = COLUMN_DEFINITIONS.find((d) => d.key === key);
+        if (!def) return undefined;
+        // Override Avg Wait label with dynamic window
+        if (key === 'avgWait') {
+          return { ...def, shortLabel: `Avg Wait (${windowLabel})`, label: `Avg Wait (${windowLabel})` };
+        }
+        return def;
+      })
       .filter((def): def is ColumnDefinition => def !== undefined);
-  }, [columnOrder, visibleSet]);
+  }, [columnOrder, visibleSet, avgWaitWindowMinutes]);
 
   // Column keys for the SortableContext (only the visible ones, in order)
   const columnKeys = useMemo(() => columns.map((c) => c.key), [columns]);

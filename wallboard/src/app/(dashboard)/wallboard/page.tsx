@@ -305,6 +305,7 @@ export default function WallboardPage() {
           onWatchColumnChange={handleWatchColumnChange}
           currentUserExtension={currentUserExtension}
           currentUserRole={currentUserRole}
+          avgWaitWindowMinutes={data.avgWaitWindowMinutes}
         />
       )}
 

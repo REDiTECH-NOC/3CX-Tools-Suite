@@ -27,7 +27,7 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const GRACE_PERIOD_MS = 60 * 1000; // 60 seconds before stopping after last client disconnects
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_AVG_WAIT_WINDOW_MIN = 60;
-const REPORT_API_INTERVAL_MS = 30_000; // Query Report API every 30s for authoritative stats
+const REPORT_API_INTERVAL_MS = 15_000; // Query Report API every 15s for authoritative stats
 const MANAGER_FETCH_INTERVAL_MS = 60_000; // Fetch queue managers every 60s (rarely change)
 
 /**
@@ -137,6 +137,7 @@ class ThreecxPoller {
   private _reportFieldsLogged = false; // log Report API field structure once
   private _waitObservations = new Map<string, Array<{ ts: number; wait: number }>>(); // windowed peak tracking
   private _previousQueuedCalls = new Map<string, Map<number, { startStr: string; lastSeenServerMs: number }>>(); // call departure tracking
+  private _waitObservationsSeeded = false; // seed from DB on first poll after restart
   private _lastRelayMode = false; // track mode transitions for logging
   private _relayDataHandler: (() => void) | null = null; // bound handler for relay EventEmitter
   private _relayPollDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -418,7 +419,35 @@ class ThreecxPoller {
         if (this._todayMaxWaitDate !== todayStr) {
           this._todayMaxWait.clear();
           this._waitObservations.clear();
+          this._waitObservationsSeeded = false;
           this._todayMaxWaitDate = todayStr;
+        }
+
+        // Seed _waitObservations from QueueSnapshot DB on first poll (survives restart)
+        if (!this._waitObservationsSeeded) {
+          this._waitObservationsSeeded = true;
+          try {
+            const windowCutoff = new Date(now.getTime() - avgWaitWindowMinutes * 60 * 1000);
+            const snapshots = await prisma.queueSnapshot.findMany({
+              where: { timestamp: { gte: windowCutoff }, longestWaitSec: { gt: 0 } },
+              select: { queueId: true, timestamp: true, longestWaitSec: true },
+            });
+            const queueIdToNumber = new Map(visibleQueues.map((q) => [q.queueId, q.queueNumber]));
+            let seeded = 0;
+            for (const snap of snapshots) {
+              const queueNumber = queueIdToNumber.get(snap.queueId);
+              if (!queueNumber) continue;
+              const obs = this._waitObservations.get(queueNumber) ?? [];
+              obs.push({ ts: snap.timestamp.getTime(), wait: snap.longestWaitSec });
+              this._waitObservations.set(queueNumber, obs);
+              seeded++;
+            }
+            if (seeded > 0) {
+              console.log(`[ThreecxPoller] Seeded _waitObservations from ${seeded} DB snapshots (window=${avgWaitWindowMinutes}m)`);
+            }
+          } catch (err) {
+            console.warn('[ThreecxPoller] Failed to seed wait observations from DB:', err instanceof Error ? err.message : String(err));
+          }
         }
 
         // Report API stats — prefer relay-provided stats (local collection),
@@ -856,11 +885,39 @@ class ThreecxPoller {
         if (this._todayMaxWaitDate !== todayStr) {
           this._todayMaxWait.clear();
           this._waitObservations.clear();
+          this._waitObservationsSeeded = false;
           this._todayMaxWaitDate = todayStr;
         }
       }
 
-      // ── 5b. Query 3CX Report API for stats (every 30s) ──
+      // Seed _waitObservations from QueueSnapshot DB on first poll (survives restart)
+      if (!this._waitObservationsSeeded) {
+        this._waitObservationsSeeded = true;
+        try {
+          const windowCutoff = new Date(now.getTime() - avgWaitWindowMinutes * 60 * 1000);
+          const snapshots = await prisma.queueSnapshot.findMany({
+            where: { timestamp: { gte: windowCutoff }, longestWaitSec: { gt: 0 } },
+            select: { queueId: true, timestamp: true, longestWaitSec: true },
+          });
+          const queueIdToNumber = new Map(visibleQueues.map((q) => [q.queueId, q.queueNumber]));
+          let seeded = 0;
+          for (const snap of snapshots) {
+            const queueNumber = queueIdToNumber.get(snap.queueId);
+            if (!queueNumber) continue;
+            const obs = this._waitObservations.get(queueNumber) ?? [];
+            obs.push({ ts: snap.timestamp.getTime(), wait: snap.longestWaitSec });
+            this._waitObservations.set(queueNumber, obs);
+            seeded++;
+          }
+          if (seeded > 0) {
+            console.log(`[ThreecxPoller] Seeded _waitObservations from ${seeded} DB snapshots (window=${avgWaitWindowMinutes}m)`);
+          }
+        } catch (err) {
+          console.warn('[ThreecxPoller] Failed to seed wait observations from DB:', err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      // ── 5b. Query 3CX Report API for stats (every 15s) ──
       // Two queries:
       //   1. WINDOWED query (last N minutes) → feeds wallboard avgWaitSec column
       //   2. FULL-DAY query → persists to QueueDailySummary for historical reporting

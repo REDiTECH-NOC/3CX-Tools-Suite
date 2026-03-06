@@ -27,7 +27,7 @@ import { Pusher } from './pusher';
 const SLOW_USERS_INTERVAL_MS = 10_000;      // User profiles/registration
 const SLOW_QUEUES_INTERVAL_MS = 60_000;      // Queue definitions
 const SLOW_AGENTS_INTERVAL_MS = 10_000;      // Queue agent membership (10s — must detect adds/removes quickly)
-const REPORT_API_INTERVAL_MS = 30_000;       // Report API stats
+const REPORT_API_INTERVAL_MS = 15_000;       // Report API stats (15s for faster answered/abandoned updates)
 const PBX_TIMEZONE = 'America/Chicago';      // TODO: make configurable or detect from PBX
 
 // ─── Main ─────────────────────────────────────────────────────
