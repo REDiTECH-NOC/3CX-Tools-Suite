@@ -95,7 +95,7 @@ export function setAgentOverride(queueNumber: string, ext: string, loggedIn: boo
   // Remove any existing override for the same agent+queue
   const idx = _agentOverrides.findIndex(o => o.queueNumber === queueNumber && o.ext === ext);
   if (idx >= 0) _agentOverrides.splice(idx, 1);
-  _agentOverrides.push({ queueNumber, ext, loggedIn, expiresAt: Date.now() + 10_000 });
+  _agentOverrides.push({ queueNumber, ext, loggedIn, expiresAt: Date.now() + 20_000 });
 }
 
 /**

@@ -144,7 +144,9 @@ export class QueueMonitor {
   private isConnecting = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private staleTimer: ReturnType<typeof setTimeout> | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private gotInitialData = false;
+  private currentSessionKey: string | null = null;
 
   data: MonitorData = { byNumber: new Map(), lastUpdated: 0 };
 
@@ -172,10 +174,13 @@ export class QueueMonitor {
     this.stopped = true;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.staleTimer) { clearTimeout(this.staleTimer); this.staleTimer = null; }
+    if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = null; }
     this.disconnect();
   }
 
   private disconnect(): void {
+    if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = null; }
+    this.currentSessionKey = null;
     if (this.socket) {
       this.socket.removeAllListeners();
       try { sendWsFrame(this.socket, 0x08, Buffer.alloc(0)); } catch {}
@@ -208,7 +213,13 @@ export class QueueMonitor {
       if (!session) { this.scheduleReconnect(15000); return; }
 
       this.gotInitialData = false;
+      this.currentSessionKey = session.sessionKey;
       await this.connectWebSocket(session.sessionKey, session.pass, token);
+
+      // Start periodic refresh — re-request QueuesInfo every 15s
+      // The PBX doesn't push updates for REST API-initiated login/logout changes,
+      // so we need to actively poll for fresh queue data.
+      this.startPeriodicRefresh(session.sessionKey);
 
       setTimeout(() => {
         if (!this.stopped && !this.gotInitialData && this.connected) {
@@ -405,6 +416,17 @@ export class QueueMonitor {
       req.write(msg);
       req.end();
     });
+  }
+
+  private startPeriodicRefresh(sessionKey: string): void {
+    if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = null; }
+
+    const refresh = () => {
+      if (this.stopped || !this.connected) return;
+      this.sendHttpCommand(sessionKey, 102).catch(() => {});
+      this.refreshTimer = setTimeout(refresh, 15_000);
+    };
+    this.refreshTimer = setTimeout(refresh, 15_000);
   }
 
   private handleBinaryMessage(payload: Buffer): void {
