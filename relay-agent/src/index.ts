@@ -1,0 +1,448 @@
+#!/usr/bin/env node
+/**
+ * 3CX Relay Agent — Entry Point (WebSocket Architecture)
+ *
+ * Split polling architecture:
+ *   FAST (750ms): ActiveCalls only — detects call state changes instantly
+ *   SLOW (10s):   Users — profile/registration changes
+ *   SLOW (60s):   Queue definitions — names, numbers (almost never change)
+ *   SLOW (3min):  Queue agent membership — which agents belong to which queue
+ *   SLOW (30s):   Report API — day totals (answered, abandoned, avg wait)
+ *
+ * Agent login/logout: Event-driven via PBX MyPhone WebSocket (no polling).
+ * Change detection: Fingerprinting — only pushes when state actually differs.
+ * Transport: Persistent WebSocket to wallboard + optional HTTP to auto-pager.
+ */
+
+import { loadConfig } from './config';
+import { Collector } from './collector';
+import type { ActiveCall, PbxQueue, PbxUser, QueueAgent, QueueDetailedStats } from './collector';
+import { QueueMonitor } from './monitor';
+import { WsClient } from './ws-client';
+import { StateManager } from './state-manager';
+import type { RelayQueueData, RelayAgentData, RelayQueuedCall, RelayPushPayload, RelayReportStats } from './state-manager';
+import { Pusher } from './pusher';
+
+// ─── Config ───────────────────────────────────────────────────
+
+const SLOW_USERS_INTERVAL_MS = 10_000;      // User profiles/registration
+const SLOW_QUEUES_INTERVAL_MS = 60_000;      // Queue definitions
+const SLOW_AGENTS_INTERVAL_MS = 180_000;     // Queue agent membership (3min)
+const REPORT_API_INTERVAL_MS = 30_000;       // Report API stats
+const PBX_TIMEZONE = 'America/Chicago';      // TODO: make configurable or detect from PBX
+
+// ─── Main ─────────────────────────────────────────────────────
+
+const config = loadConfig();
+const collector = new Collector(config.pbxUrl, config.pbxExtension, config.pbxPassword);
+const monitor = new QueueMonitor(config.pbxUrl, config.pbxExtension, config.pbxPassword);
+const wsClient = new WsClient(config.wallboardWsUrl, config.apiKey);
+const stateManager = new StateManager();
+
+const autoPagerPusher = config.autoPagerUrl && config.autoPagerApiKey
+  ? new Pusher(config.autoPagerUrl, config.autoPagerApiKey)
+  : null;
+
+let running = true;
+let fastTimer: ReturnType<typeof setTimeout> | null = null;
+let _fastPollCount = 0;
+let _pushCount = 0;
+
+// ─── Cached slow data ────────────────────────────────────────
+
+let cachedQueues: PbxQueue[] = [];
+let cachedUsers: PbxUser[] = [];
+let cachedUserMap = new Map<string, PbxUser>();
+const queueAgentCache = new Map<number, string[]>(); // queueId → ext numbers
+
+let lastUsersFetch = 0;
+let lastQueuesFetch = 0;
+let lastAgentsFetch = 0;
+let lastReportFetch = 0;
+
+// ─── Wire up event-driven pushes ──────────────────────────────
+
+stateManager.on('change', (payload: RelayPushPayload) => {
+  const sent = wsClient.send(payload);
+  if (sent) _pushCount++;
+
+  if (autoPagerPusher && !autoPagerPusher.isAuthFailed()) {
+    autoPagerPusher.push(payload).catch(() => {});
+  }
+
+  if (config.logLevel === 'debug') {
+    const totalWaiting = payload.queues.reduce((s, q) => s + q.callsWaiting, 0);
+    console.log(`[Relay] CHANGE: ${payload.queues.length}q, ${totalWaiting} waiting (ws=${sent ? 'sent' : 'buffered'})`);
+  }
+});
+
+stateManager.on('sync', (payload: RelayPushPayload) => {
+  const sent = wsClient.send(payload);
+  if (sent) _pushCount++;
+
+  if (autoPagerPusher && !autoPagerPusher.isAuthFailed()) {
+    autoPagerPusher.push(payload).catch(() => {});
+  }
+});
+
+// ─── Slow data refresh ───────────────────────────────────────
+
+async function refreshSlowData(): Promise<void> {
+  const now = Date.now();
+
+  // Users — every 10s (profile changes, registration status)
+  if (now - lastUsersFetch >= SLOW_USERS_INTERVAL_MS) {
+    try {
+      cachedUsers = await collector.getUsers();
+      cachedUserMap = new Map(cachedUsers.map(u => [u.Number, u]));
+      lastUsersFetch = now;
+    } catch (err) {
+      console.error('[Relay] Users refresh failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Queue definitions — every 60s (names, numbers — almost never change)
+  if (now - lastQueuesFetch >= SLOW_QUEUES_INTERVAL_MS) {
+    try {
+      cachedQueues = await collector.getQueues();
+      lastQueuesFetch = now;
+    } catch (err) {
+      console.error('[Relay] Queues refresh failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Queue agent membership — every 3min (which agents belong to which queue)
+  if (now - lastAgentsFetch >= SLOW_AGENTS_INTERVAL_MS) {
+    try {
+      const results = await Promise.all(
+        cachedQueues.map(q => collector.getQueueAgents(q.Id).then(agents => ({ id: q.Id, agents })))
+      );
+      for (const { id, agents } of results) {
+        queueAgentCache.set(id, agents.map(a => a.Number));
+      }
+      lastAgentsFetch = now;
+    } catch (err) {
+      console.error('[Relay] Agent membership refresh failed:', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // Report API — every 30s (day totals: answered, abandoned, avg wait)
+  if (now - lastReportFetch >= REPORT_API_INTERVAL_MS) {
+    try {
+      const nowDate = new Date();
+      const dayStart = getMidnightInTimezone(PBX_TIMEZONE, nowDate);
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const windowMinutes = 60; // 1hr window, same as wallboard default
+      const windowStart = new Date(now - windowMinutes * 60 * 1000);
+
+      const [windowedRaw, fullDayRaw] = await Promise.all([
+        collector.getQueueDetailedStats(windowStart.toISOString(), nowDate.toISOString()),
+        collector.getQueueDetailedStats(dayStart.toISOString(), dayEnd.toISOString()),
+      ]);
+
+      const toRelay = (s: QueueDetailedStats): RelayReportStats => ({
+        queueNumber: s.QueueDnNumber,
+        callsCount: s.CallsCount,
+        answeredCount: s.AnsweredCount,
+        avgRingTime: s.AvgRingTime,
+        avgTalkTime: s.AvgTalkTime,
+        ringTime: s.RingTime,
+        talkTime: s.TalkTime,
+      });
+
+      stateManager.setReportStats({
+        windowedStats: windowedRaw.map(toRelay),
+        fullDayStats: fullDayRaw.map(toRelay),
+        windowMinutes,
+        pbxTimezone: PBX_TIMEZONE,
+      });
+
+      lastReportFetch = now;
+
+      if (config.logLevel === 'debug') {
+        console.log(`[Relay] Report API: ${fullDayRaw.length} queues, window=${windowMinutes}min`);
+      }
+    } catch (err) {
+      console.error('[Relay] Report API failed:', err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+/** Force an immediate refresh of agent membership (called via WS command from wallboard). */
+function forceAgentRefresh(): void {
+  lastAgentsFetch = 0;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────
+
+function getMidnightInTimezone(tz: string, now: Date): Date {
+  const dateStr = now.toLocaleDateString('en-CA', { timeZone: tz });
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const noonUtc = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const localNoon = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: 'numeric', hour12: false,
+  }).format(noonUtc);
+  const localHour = parseInt(localNoon, 10);
+  const offsetHours = localHour - 12;
+  return new Date(Date.UTC(y, m - 1, d, -offsetHours, 0, 0));
+}
+
+function deriveCallState(
+  ext: string,
+  activeCalls: ActiveCall[],
+  user: PbxUser | undefined
+): 'available' | 'talking' | 'ringing' | 'offline' {
+  if (!user?.IsRegistered) return 'offline';
+
+  for (const call of activeCalls) {
+    if (call.Caller === ext || call.Callee === ext) {
+      const status = (call.Status || '').toLowerCase();
+      if (status.includes('talking') || status.includes('connected')) return 'talking';
+      if (status.includes('ringing') || status.includes('routing')) return 'ringing';
+    }
+    if (call.Segments) {
+      for (const seg of call.Segments) {
+        if (seg.Dn === ext || seg.DialedDn === ext || seg.CallerNumber === ext || seg.CalleeNumber === ext) {
+          const segStatus = (seg.Status || '').toLowerCase();
+          if (segStatus.includes('talking') || segStatus.includes('connected')) return 'talking';
+          if (segStatus.includes('ringing') || segStatus.includes('routing')) return 'ringing';
+        }
+      }
+    }
+  }
+
+  return 'available';
+}
+
+function computeQueuedCalls(
+  queueNumber: string,
+  activeCalls: ActiveCall[],
+  serverNow: Date
+): { queuedCalls: RelayQueuedCall[]; callsWaiting: number; longestWaitSec: number } {
+  const queuedCalls: RelayQueuedCall[] = [];
+  let longestWaitSec = 0;
+
+  for (const call of activeCalls) {
+    const status = (call.Status || '').toLowerCase();
+    const isWaiting = status.includes('routing') || status.includes('transferring');
+    const targetsQueue = call.Callee === queueNumber;
+
+    if (!isWaiting || !targetsQueue) {
+      if (call.Segments) {
+        const queueSeg = call.Segments.find(
+          s => s.DialedDn === queueNumber || s.CalleeNumber === queueNumber
+        );
+        if (!queueSeg) continue;
+        const segStatus = (queueSeg.Status || '').toLowerCase();
+        if (!segStatus.includes('routing') && !segStatus.includes('transferring') && !segStatus.includes('ringing')) continue;
+      } else {
+        continue;
+      }
+    }
+
+    let waitSec = 0;
+    const changeTime = call.LastChangeStatus || call.EstablishedAt;
+    if (changeTime) {
+      const callTime = new Date(changeTime);
+      waitSec = Math.max(0, Math.floor((serverNow.getTime() - callTime.getTime()) / 1000));
+    }
+
+    longestWaitSec = Math.max(longestWaitSec, waitSec);
+
+    queuedCalls.push({
+      id: call.Id,
+      caller: call.Caller || '',
+      callerName: '',
+      waitSec,
+      startedAt: changeTime || new Date().toISOString(),
+    });
+  }
+
+  return { queuedCalls, callsWaiting: queuedCalls.length, longestWaitSec };
+}
+
+// ─── Fast Poll Loop (750ms — ActiveCalls only) ───────────────
+
+async function fastPoll(): Promise<void> {
+  if (!running) return;
+
+  try {
+    // Check if slow data needs refreshing (runs inline, skips if not due)
+    await refreshSlowData();
+
+    // FAST: Only fetch active calls every cycle
+    const activeCalls = await collector.getActiveCalls();
+
+    const serverNow = activeCalls.length > 0 && activeCalls[0].ServerNow
+      ? new Date(activeCalls[0].ServerNow)
+      : new Date();
+
+    // Build per-queue data using cached slow data + fresh active calls
+    const relayQueues: RelayQueueData[] = [];
+
+    for (const queue of cachedQueues) {
+      const agentExts = queueAgentCache.get(queue.Id) ?? [];
+
+      const agents: RelayAgentData[] = [];
+      for (const ext of agentExts) {
+        const user = cachedUserMap.get(ext);
+        const callState = deriveCallState(ext, activeCalls, user);
+        const wsLoggedIn = monitor.isAgentLoggedIn(queue.Number, ext);
+
+        agents.push({
+          ext,
+          name: user ? `${user.FirstName} ${user.LastName}`.trim() : ext,
+          loggedIn: wsLoggedIn ?? true,
+          callState,
+          profileName: user?.CurrentProfileName ?? 'Unknown',
+          isRegistered: user?.IsRegistered ?? false,
+        });
+      }
+
+      const { queuedCalls, callsWaiting, longestWaitSec } = computeQueuedCalls(
+        queue.Number, activeCalls, serverNow
+      );
+
+      relayQueues.push({
+        id: queue.Id,
+        number: queue.Number,
+        name: queue.Name,
+        callsWaiting,
+        longestWaitSec,
+        agents,
+        queuedCalls,
+      });
+    }
+
+    // Feed into StateManager — it will emit 'change' or 'sync' as needed
+    stateManager.update(relayQueues);
+    _fastPollCount++;
+
+  } catch (err) {
+    console.error('[Relay] Poll error:', err instanceof Error ? err.message : err);
+  }
+
+  // Schedule next fast poll
+  if (running) {
+    fastTimer = setTimeout(fastPoll, config.pollIntervalMs);
+  }
+}
+
+// ─── Status logging ───────────────────────────────────────────
+
+function logStatus(): void {
+  if (!running) return;
+  const ws = wsClient.isConnected() ? 'connected' : 'disconnected';
+  const mon = monitor.hasData() ? 'active' : 'waiting';
+  const ap = autoPagerPusher ? (autoPagerPusher.isAuthFailed() ? 'auth-failed' : 'active') : 'n/a';
+  const qCount = cachedQueues.length;
+  const aCount = Array.from(queueAgentCache.values()).reduce((s, a) => s + a.length, 0);
+  console.log(`[Relay] ws=${ws} mon=${mon} polls=${_fastPollCount} pushes=${_pushCount} queues=${qCount} agents=${aCount} autopager=${ap}`);
+  _fastPollCount = 0;
+  _pushCount = 0;
+}
+
+// ─── Start ────────────────────────────────────────────────────
+
+async function start(): Promise<void> {
+  console.log('=== 3CX Relay Agent (WebSocket) ===');
+  console.log(`PBX: ${config.pbxUrl}`);
+  console.log(`Wallboard WS: ${config.wallboardWsUrl}`);
+  console.log(`Wallboard HTTP: ${config.wallboardUrl} (fallback)`);
+  if (config.autoPagerUrl) console.log(`Auto-Pager: ${config.autoPagerUrl}`);
+  console.log(`Fast poll: ${config.pollIntervalMs}ms | Users: ${SLOW_USERS_INTERVAL_MS / 1000}s | Queues: ${SLOW_QUEUES_INTERVAL_MS / 1000}s | Agents: ${SLOW_AGENTS_INTERVAL_MS / 1000}s | Report: ${REPORT_API_INTERVAL_MS / 1000}s`);
+  console.log(`Log level: ${config.logLevel}`);
+  console.log();
+
+  // Test PBX authentication
+  try {
+    console.log('[Relay] Authenticating with PBX...');
+    await collector.authenticate();
+    console.log('[Relay] PBX authentication successful');
+  } catch (err) {
+    console.error('[Relay] PBX authentication failed:', err instanceof Error ? err.message : err);
+    console.error('[Relay] Check pbxUrl, pbxExtension, and pbxPassword');
+    process.exit(1);
+  }
+
+  // Pre-fetch all slow data before starting the fast loop
+  console.log('[Relay] Loading initial data...');
+  try {
+    const [queues, users] = await Promise.all([
+      collector.getQueues(),
+      collector.getUsers(),
+    ]);
+    cachedQueues = queues;
+    cachedUsers = users;
+    cachedUserMap = new Map(users.map(u => [u.Number, u]));
+    lastQueuesFetch = Date.now();
+    lastUsersFetch = Date.now();
+
+    console.log(`[Relay] Found ${queues.length} queues, ${users.length} users`);
+
+    // Fetch agent memberships for all queues
+    const agentResults = await Promise.all(
+      queues.map(q => collector.getQueueAgents(q.Id).then(agents => ({ id: q.Id, agents })))
+    );
+    for (const { id, agents } of agentResults) {
+      queueAgentCache.set(id, agents.map(a => a.Number));
+    }
+    lastAgentsFetch = Date.now();
+
+    const totalAgents = agentResults.reduce((s, r) => s + r.agents.length, 0);
+    console.log(`[Relay] Loaded agent memberships: ${totalAgents} total across ${queues.length} queues`);
+  } catch (err) {
+    console.error('[Relay] Initial data load failed:', err instanceof Error ? err.message : err);
+    console.error('[Relay] Will retry on first poll cycle');
+  }
+
+  // Start WebSocket connection to wallboard (non-blocking, auto-reconnects)
+  console.log('[Relay] Connecting to wallboard via WebSocket...');
+  wsClient.connect();
+
+  // Start PBX WebSocket queue monitor for event-driven agent login/logout
+  console.log('[Relay] Starting PBX queue monitor...');
+  monitor.start().catch(err => {
+    console.error('[Relay] Monitor start error:', err instanceof Error ? err.message : err);
+  });
+
+  // Wait briefly for monitor to connect before first poll
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  // Start fast poll loop
+  console.log(`[Relay] Starting fast poll loop (${config.pollIntervalMs}ms)`);
+  fastPoll();
+
+  // Periodic status log every 30s
+  const statusInterval = setInterval(logStatus, 30_000);
+
+  // Clean up on shutdown
+  const origShutdown = shutdown;
+  process.removeAllListeners('SIGTERM');
+  process.removeAllListeners('SIGINT');
+  process.on('SIGTERM', () => { clearInterval(statusInterval); origShutdown(); });
+  process.on('SIGINT', () => { clearInterval(statusInterval); origShutdown(); });
+}
+
+function shutdown(): void {
+  console.log('\n[Relay] Shutting down...');
+  running = false;
+  if (fastTimer) {
+    clearTimeout(fastTimer);
+    fastTimer = null;
+  }
+  wsClient.stop();
+  monitor.stop();
+  console.log('[Relay] Stopped');
+  process.exit(0);
+}
+
+// Graceful shutdown
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+// Start
+start().catch(err => {
+  console.error('[Relay] Fatal error:', err instanceof Error ? err.message : err);
+  process.exit(1);
+});

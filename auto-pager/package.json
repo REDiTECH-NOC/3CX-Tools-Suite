@@ -1,0 +1,27 @@
+{
+  "name": "3cx-auto-pager",
+  "version": "1.0.0",
+  "description": "3CX Queue Auto-Pager — monitors queue wait times and triggers paging announcements",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "asterisk-manager": "^0.2.0",
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.0",
+    "@types/node-fetch": "^2.6.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

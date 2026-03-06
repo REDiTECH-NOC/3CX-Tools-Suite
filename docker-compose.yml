@@ -1,0 +1,70 @@
+# 3CX Tools Suite — Docker Compose
+#
+# Each tool can be deployed independently:
+#   docker compose up -d wallboard db        # Wallboard only
+#   docker compose up -d auto-pager          # Auto-Pager only
+#   docker compose up -d                     # Everything
+#
+# The relay-agent runs directly on the PBX (not in Docker).
+# See relay-agent/install.sh for installation.
+
+services:
+  # ── Wallboard (Next.js + PostgreSQL) ─────────────────────────
+  wallboard:
+    build:
+      context: ./wallboard
+      dockerfile: Dockerfile
+    container_name: 3cx-wallboard
+    restart: unless-stopped
+    ports:
+      - "${WALLBOARD_PORT:-4200}:3000"
+      - "${RELAY_WS_PORT:-3100}:3100"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-wallboard}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@db:5432/${POSTGRES_DB:-wallboard}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY required}
+      - ENCRYPTION_SALT=${ENCRYPTION_SALT:?ENCRYPTION_SALT required}
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET required}
+      - ADMIN_EXTENSIONS=${ADMIN_EXTENSIONS:-}
+      - NODE_ENV=production
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - tools-net
+
+  db:
+    image: postgres:16-alpine
+    container_name: 3cx-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wallboard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:-wallboard}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wallboard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tools-net
+
+  # ── Auto-Pager (Asterisk + Express) ─────────────────────────
+  auto-pager:
+    build:
+      context: ./auto-pager
+      dockerfile: Dockerfile
+    container_name: 3cx-auto-pager
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - pager-data:/data
+
+volumes:
+  pgdata:
+  pager-data:
+
+networks:
+  tools-net:
+    driver: bridge

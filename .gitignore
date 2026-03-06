@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+app/.next/
+app/out/
+auto-pager/dist/
+relay-agent/dist/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Data / runtime
+*.db
+*.sqlite
+/data/
+
+# Temp / scratch
+_temp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets
+*.pem
+*.key

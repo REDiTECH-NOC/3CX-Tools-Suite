@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+// ─── System Configuration (singleton row, created during setup wizard) ──────
+
+model SystemConfig {
+  id                   String   @id @default("singleton")
+  pbxUrl               String   // FQDN e.g. "customer.my3cx.us"
+  extensionNumber      String   // System Owner extension for API auth
+  encryptedPassword    String   // AES-256-GCM encrypted web client password
+  pollIntervalMs       Int      @default(10000)
+  pbxTimezone          String   @default("America/Chicago") // IANA timezone for "today" calculations
+  avgWaitWindowMinutes Int      @default(60) // Rolling window for adjustable avg wait
+  setupComplete        Boolean  @default(false)
+  // Relay agent
+  relayApiKeyHash      String?  // bcrypt hash of relay API key
+  relayApiKeyPrefix    String?  // First 8 chars for identification
+  relayLastHeartbeat   DateTime?
+  relayLastIp          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// ─── Users (auto-created on first extension login) ──────────────────────
+
+model User {
+  id              String          @id @default(cuid())
+  extensionNumber String          @unique
+  displayName     String
+  role            UserRole        @default(USER)
+  isActive        Boolean         @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  sessions        Session[]
+  preferences     UserPreference?
+}
+
+// ─── Server-side Session Management ──────────────────────────────────────
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([expiresAt])
+}
+
+// ─── User Preferences (per-user wallboard customization) ─────────────────
+
+model UserPreference {
+  id                  String  @id @default(cuid())
+  userId              String  @unique
+  user                User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Column visibility — JSON array of visible column keys
+  visibleColumns      Json    @default("[\"queueName\",\"currentWait\",\"avgWait\",\"totalAvgWait\",\"agentsAvailable\",\"agentsTalking\",\"callsQueued\",\"callsAnswered\",\"callsAbandoned\",\"abandonRate\"]")
+  // Column order — JSON array of column keys in display order
+  columnOrder         Json    @default("[\"queueName\",\"currentWait\",\"avgWait\",\"totalAvgWait\",\"agentsAvailable\",\"agentsTalking\",\"callsQueued\",\"callsAnswered\",\"callsAbandoned\",\"abandonRate\"]")
+  // Display
+  rowDensity          String  @default("comfortable") // compact | comfortable | spacious
+  fontSize            String  @default("medium")      // small | medium | large
+  analyticsCollapsed  Boolean @default(false)
+  autoExpandRows      Boolean @default(false)
+  // Theme: dark | light | system
+  theme               String  @default("dark")
+  // Sound alerts — JSON object { metric: boolean }
+  soundAlerts         Json    @default("{}")
+  // Push notifications enabled
+  pushNotifications   Boolean @default(false)
+  // Pinned queues — JSON array of queue IDs pinned to top
+  pinnedQueues        Json    @default("[]")
+  // Sort preference
+  sortColumn          String? // column key
+  sortDirection       String  @default("asc") // asc | desc
+  // Queue ordering mode
+  queueOrderMode      String  @default("default") // "default" | "manual" | "watch"
+  manualQueueOrder    Json    @default("[]")       // ordered queue ID strings
+  watchColumn         String?                       // column key for watch-column auto-sort
+
+  updatedAt           DateTime @updatedAt
+}
+
+// ─── Wallboard Queue Configuration ──────────────────────────────────────
+
+model WallboardQueue {
+  id          String   @id @default(cuid())
+  queueId     Int      @unique  // 3CX Queue ID
+  queueNumber String
+  queueName   String
+  visible     Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  thresholds WallboardThreshold[]
+
+  @@index([visible, sortOrder])
+}
+
+// ─── Color Threshold Configuration ──────────────────────────────────────
+
+model WallboardThreshold {
+  id               String          @id @default(cuid())
+  wallboardQueueId String?         // null = global default
+  queue            WallboardQueue? @relation(fields: [wallboardQueueId], references: [id], onDelete: Cascade)
+  metric           String          // currentWait | avgWait | callsQueued | callsAbandoned | abandonRate | agentsAvailable
+  yellowValue      Float
+  redValue         Float
+  // For agentsAvailable, logic is inverted: fewer agents = worse
+  invertLogic      Boolean         @default(false)
+  updatedAt        DateTime        @updatedAt
+
+  @@unique([wallboardQueueId, metric])
+  @@index([metric])
+}
+
+// ─── Queue Snapshot (point-in-time metrics, stored every poll) ───────────
+
+model QueueSnapshot {
+  id              String   @id @default(cuid())
+  queueId         Int
+  timestamp       DateTime @default(now())
+  callsWaiting    Int      @default(0)
+  callsAnswered   Int      @default(0)
+  callsAbandoned  Int      @default(0)
+  agentsLoggedIn  Int      @default(0)
+  agentsTalking   Int      @default(0)
+  agentsAvailable Int      @default(0)
+  longestWaitSec  Int      @default(0)
+  avgWaitSec      Float    @default(0)
+  abandonRate     Float    @default(0)
+
+  @@index([queueId, timestamp])
+  @@index([timestamp])
+}
+
+// ─── Daily Queue Summary (aggregated, indefinite retention) ──────────────
+
+model QueueDailySummary {
+  id              String   @id @default(cuid())
+  queueId         Int
+  date            DateTime @db.Date
+  totalAnswered   Int      @default(0)
+  totalAbandoned  Int      @default(0)
+  totalOffered    Int      @default(0)
+  avgWaitSec      Float    @default(0)
+  maxWaitSec      Int      @default(0)
+  avgTalkSec      Float    @default(0)
+  slaPercent      Float?
+  answeredByHour  Json     @default("[]")
+  abandonedByHour Json     @default("[]")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([queueId, date])
+  @@index([queueId])
+  @@index([date])
+}

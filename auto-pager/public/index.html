@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3CX Auto-Pager</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --bg-card: #181a20;
+      --bg-input: #23262f;
+      --border: #2a2d37;
+      --text: #e4e4e7;
+      --text-muted: #8b8d97;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --radius: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header h1 { font-size: 1.25rem; font-weight: 600; }
+    .header .status-badges { display: flex; gap: 8px; }
+    .badge {
+      font-size: 0.75rem;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+    .badge-green { background: #16a34a22; color: var(--success); border: 1px solid #16a34a44; }
+    .badge-red { background: #dc262622; color: var(--danger); border: 1px solid #dc262644; }
+    .badge-yellow { background: #d9770622; color: var(--warning); border: 1px solid #d9770644; }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      gap: 0;
+    }
+    .tab {
+      padding: 12px 20px;
+      cursor: pointer;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+    /* ── Content ── */
+    .content { max-width: 1600px; margin: 0 auto; padding: 24px; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; }
+    .card h3 { font-size: 0.875rem; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; }
+
+    /* ── Forms ── */
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+    input[type="text"], input[type="password"], input[type="number"], select {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, select:focus { border-color: var(--primary); }
+    .form-row { display: flex; gap: 12px; }
+    .form-row > * { flex: 1; }
+
+    /* ── Buttons ── */
+    button, .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover { background: var(--danger-hover); }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .btn-outline:hover { border-color: var(--text-muted); }
+    .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+
+    /* ── Tables ── */
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    th { color: var(--text-muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    tr:hover { background: #ffffff06; }
+
+    /* ── Toggle switch ── */
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      display: inline-block;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      transition: 0.2s;
+    }
+    .toggle .slider::before {
+      content: "";
+      position: absolute;
+      height: 16px;
+      width: 16px;
+      left: 2px;
+      bottom: 2px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .slider { background: var(--primary); border-color: var(--primary); }
+    .toggle input:checked + .slider::before { transform: translateX(18px); background: #fff; }
+
+    /* ── File upload ── */
+    .upload-area {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      color: var(--text-muted);
+    }
+    .upload-area:hover { border-color: var(--primary); color: var(--text); }
+
+    /* ── Status indicator ── */
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status-dot.green { background: var(--success); }
+    .status-dot.red { background: var(--danger); }
+    .status-dot.yellow { background: var(--warning); }
+
+    /* ── Log result badges ── */
+    .result-success { color: var(--success); }
+    .result-failed { color: var(--danger); }
+
+    /* ── Queue selector grid ── */
+    .queue-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 10px;
+    }
+    .queue-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .queue-chip:hover { border-color: var(--text-muted); }
+    .queue-chip.selected { border-color: var(--primary); background: #3b82f610; }
+    .queue-chip .queue-info { flex: 1; }
+    .queue-chip .queue-number { font-size: 0.75rem; color: var(--text-muted); }
+    .queue-chip .queue-name { font-size: 0.875rem; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 12px 20px;
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      z-index: 1000;
+      animation: slideIn 0.3s ease;
+    }
+    .toast-success { background: #16a34a; color: #fff; }
+    .toast-error { background: var(--danger); color: #fff; }
+    @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    /* ── Misc ── */
+    .flex { display: flex; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .gap-2 { gap: 8px; }
+    .gap-3 { gap: 12px; }
+    .mt-2 { margin-top: 8px; }
+    .mt-3 { margin-top: 12px; }
+    .mb-2 { margin-bottom: 8px; }
+    .text-sm { font-size: 0.8125rem; }
+    .text-xs { font-size: 0.75rem; }
+    .text-muted { color: var(--text-muted); }
+    .text-right { text-align: right; }
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>3CX Auto-Pager</h1>
+    <div class="status-badges" id="statusBadges">
+      <span class="badge badge-yellow" id="badgeMonitor">Monitor: --</span>
+      <span class="badge badge-yellow" id="badgeAsterisk">Asterisk: --</span>
+      <span class="badge badge-yellow" id="badgeAmi">AMI: --</span>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="dashboard">Dashboard</div>
+    <div class="tab" data-tab="settings">Settings</div>
+    <div class="tab" data-tab="queues">Queues</div>
+    <div class="tab" data-tab="audio">Audio Files</div>
+    <div class="tab" data-tab="log">Page Log</div>
+  </div>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- Dashboard Tab -->
+    <div class="tab-panel active" id="tab-dashboard">
+      <div class="card">
+        <h2>System Status</h2>
+        <div id="dashboardStatus">Loading...</div>
+      </div>
+      <div class="card">
+        <div class="flex justify-between items-center mb-2">
+          <h2>Active Calls in Monitored Queues</h2>
+        </div>
+        <div id="trackedCallsList">
+          <div class="empty-state">No calls currently waiting in monitored queues</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="flex justify-between items-center mb-2">
+          <h2>Recent Page Events</h2>
+        </div>
+        <div id="recentPages">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Settings Tab -->
+    <div class="tab-panel" id="tab-settings">
+      <div class="card">
+        <h2>3CX Connection (API)</h2>
+        <p class="text-xs text-muted mb-2">Used to query queues, active calls, and ring groups via XAPI.</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>PBX URL</label>
+            <input type="text" id="set-pbx_url" placeholder="pbx.example.com" />
+          </div>
+          <div class="form-group">
+            <label>Extension Number</label>
+            <input type="text" id="set-pbx_extension" placeholder="1000" />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="set-pbx_password" placeholder="password" />
+          </div>
+        </div>
+        <div class="flex gap-2 mt-2">
+          <button class="btn btn-outline" onclick="testConnection()">Test Connection</button>
+          <span id="connTestResult" class="text-sm" style="align-self: center;"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>SIP Registration (Audio Playback)</h2>
+        <p class="text-xs text-muted mb-2">Asterisk registers as a SIP extension with 3CX to make calls and play audio. Use a dedicated extension. Find the Auth ID and SIP port in 3CX Admin → Extensions → Edit → Configuration.</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>SIP Extension Number</label>
+            <input type="text" id="set-sip_extension" placeholder="1000" />
+          </div>
+          <div class="form-group">
+            <label>Auth ID</label>
+            <input type="text" id="set-sip_auth_id" placeholder="EXiMOSpK5F" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>SIP Password</label>
+            <input type="password" id="set-sip_password" placeholder="SIP auth password" />
+          </div>
+          <div class="form-group">
+            <label>Transport</label>
+            <select id="set-sip_transport">
+              <option value="udp">UDP</option>
+              <option value="tls">TLS (recommended for cloud PBX)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>SIP Port</label>
+            <input type="number" id="set-sip_port" placeholder="5060" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>3CX Paging Settings</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Paging Dial Code</label>
+            <input type="text" id="set-paging_dial_code" placeholder="*72" />
+          </div>
+          <div class="form-group">
+            <label>Poll Interval (ms)</label>
+            <input type="number" id="set-poll_interval_ms" placeholder="5000" />
+          </div>
+        </div>
+        <p class="text-xs text-muted mt-2">Paging dial code (e.g. *72) is prepended to the paging extension to make phones auto-answer on speaker. Find it in 3CX Admin &rarr; Settings &rarr; Advanced &rarr; Dial Codes &rarr; Paging. Leave blank to call the extension normally.</p>
+      </div>
+
+      <button class="btn btn-primary mt-2" onclick="saveSettings()">Save Settings</button>
+    </div>
+
+    <!-- Queues Tab -->
+    <div class="tab-panel" id="tab-queues">
+      <div class="card">
+        <div class="flex justify-between items-center mb-2">
+          <h2>Available Queues & Ring Groups</h2>
+          <button class="btn btn-outline btn-sm" onclick="loadPbxQueues()">Refresh from PBX</button>
+        </div>
+        <p class="text-xs text-muted mb-2">Select which queues/ring groups to monitor. Click to add.</p>
+        <div id="pbxQueueList" class="queue-grid">
+          <div class="empty-state">Load queues from PBX first</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Monitored Queues</h2>
+        <p class="text-xs text-muted mb-2">Configure thresholds and audio for each monitored queue.</p>
+        <div id="monitoredQueueTable">
+          <div class="empty-state">No queues being monitored</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audio Tab -->
+    <div class="tab-panel" id="tab-audio">
+      <div class="card">
+        <h2>Upload Audio File</h2>
+        <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+          Click to upload a WAV, MP3, or OGG file<br />
+          <span class="text-xs text-muted">Max 50MB per file</span>
+        </div>
+        <input type="file" id="fileInput" accept=".wav,.mp3,.ogg,.gsm" style="display:none" onchange="uploadFile(this)" />
+      </div>
+
+      <div class="card">
+        <div class="flex justify-between items-center mb-2">
+          <h2>Uploaded Files</h2>
+          <div class="flex gap-2 items-center">
+            <label class="text-xs text-muted" style="white-space:nowrap">Test Extension:</label>
+            <input type="text" id="testPageExtension" placeholder="e.g. 1001" style="width:100px" />
+          </div>
+        </div>
+        <div id="wavFileList">
+          <div class="empty-state">No audio files uploaded</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log Tab -->
+    <div class="tab-panel" id="tab-log">
+      <div class="card">
+        <div class="flex justify-between items-center mb-2">
+          <h2>Page Event Log</h2>
+          <button class="btn btn-outline btn-sm" onclick="loadPageLog()">Refresh</button>
+        </div>
+        <div id="pageLogTable">
+          <div class="empty-state">No page events yet</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+// ── State ──
+let currentSettings = {};
+let monitoredQueues = [];
+let wavFiles = [];
+
+// ── API helpers ──
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
+
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+// ── Tabs ──
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Settings ──
+async function loadSettings() {
+  currentSettings = await api('/settings');
+  const fields = ['pbx_url', 'pbx_extension', 'pbx_password', 'sip_extension', 'sip_auth_id', 'sip_password', 'sip_transport', 'sip_port', 'paging_dial_code', 'poll_interval_ms'];
+  for (const key of fields) {
+    const el = document.getElementById('set-' + key);
+    if (el && currentSettings[key]) el.value = currentSettings[key];
+  }
+}
+
+async function saveSettings() {
+  const fields = ['pbx_url', 'pbx_extension', 'pbx_password', 'sip_extension', 'sip_auth_id', 'sip_password', 'sip_transport', 'sip_port', 'paging_dial_code', 'poll_interval_ms'];
+  const body = {};
+  for (const key of fields) {
+    const el = document.getElementById('set-' + key);
+    if (el && el.value) body[key] = el.value;
+  }
+  await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
+  toast('Settings saved');
+  loadStatus();
+}
+
+async function testConnection() {
+  const result = document.getElementById('connTestResult');
+  result.textContent = 'Testing...';
+  result.style.color = 'var(--text-muted)';
+  try {
+    const body = {
+      pbx_url: document.getElementById('set-pbx_url').value,
+      pbx_extension: document.getElementById('set-pbx_extension').value,
+      pbx_password: document.getElementById('set-pbx_password').value,
+    };
+    const res = await api('/test-connection', { method: 'POST', body: JSON.stringify(body) });
+    if (res.success) {
+      result.textContent = 'Connected successfully!';
+      result.style.color = 'var(--success)';
+    } else {
+      result.textContent = 'Failed: ' + res.error;
+      result.style.color = 'var(--danger)';
+    }
+  } catch (err) {
+    result.textContent = 'Error: ' + err.message;
+    result.style.color = 'var(--danger)';
+  }
+}
+
+// ── Status ──
+async function loadStatus() {
+  try {
+    const status = await api('/status');
+
+    // Update badges
+    setBadge('badgeMonitor', 'Monitor', status.monitorRunning);
+    setBadge('badgeAsterisk', 'Asterisk', status.asteriskRunning);
+    setBadge('badgeAmi', 'AMI', status.amiConnected);
+
+    // Dashboard status
+    const ds = document.getElementById('dashboardStatus');
+    ds.innerHTML = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;">
+        <div>
+          <span class="status-dot ${status.monitorRunning ? 'green' : 'red'}"></span>
+          Queue Monitor: <strong>${status.monitorRunning ? 'Running' : 'Stopped'}</strong>
+        </div>
+        <div>
+          <span class="status-dot ${status.asteriskRunning ? 'green' : 'red'}"></span>
+          Asterisk: <strong>${status.asteriskRunning ? 'Running' : 'Stopped'}</strong>
+        </div>
+        <div>
+          <span class="status-dot ${status.amiConnected ? 'green' : 'red'}"></span>
+          AMI: <strong>${status.amiConnected ? 'Connected' : 'Disconnected'}</strong>
+        </div>
+        <div>
+          <span class="status-dot ${status.settings.configured ? 'green' : 'yellow'}"></span>
+          3CX: <strong>${status.settings.configured ? status.settings.pbxUrl : 'Not Configured'}</strong>
+        </div>
+      </div>
+    `;
+
+    // Tracked calls
+    const tc = document.getElementById('trackedCallsList');
+    if (status.trackedCalls && status.trackedCalls.length > 0) {
+      tc.innerHTML = `<table>
+        <thead><tr><th>Queue</th><th>Caller</th><th>Waiting</th></tr></thead>
+        <tbody>${status.trackedCalls.map(c => `
+          <tr>
+            <td>${c.queueNumber}</td>
+            <td>${c.callerNumber}</td>
+            <td>${c.waitSeconds}s</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>`;
+    } else {
+      tc.innerHTML = '<div class="empty-state">No calls currently waiting in monitored queues</div>';
+    }
+  } catch (err) {
+    console.error('Status load error:', err);
+  }
+}
+
+function setBadge(id, label, ok) {
+  const el = document.getElementById(id);
+  el.textContent = label + ': ' + (ok ? 'OK' : 'Off');
+  el.className = 'badge ' + (ok ? 'badge-green' : 'badge-red');
+}
+
+// ── PBX Queues ──
+async function loadPbxQueues() {
+  const container = document.getElementById('pbxQueueList');
+  container.innerHTML = '<div class="text-muted text-sm">Loading from PBX...</div>';
+  try {
+    const data = await api('/pbx-queues');
+    const monitoredNumbers = new Set(monitoredQueues.map(q => q.queue_number));
+
+    let html = '';
+    for (const q of data.queues) {
+      const selected = monitoredNumbers.has(q.Number) ? 'selected' : '';
+      html += `<div class="queue-chip ${selected}" onclick="toggleQueue('${q.Number}', '${esc(q.Name)}', 'queue')">
+        <div class="queue-info">
+          <div class="queue-name">${esc(q.Name)}</div>
+          <div class="queue-number">Queue ${q.Number}</div>
+        </div>
+      </div>`;
+    }
+    for (const rg of data.ringGroups) {
+      const selected = monitoredNumbers.has(rg.Number) ? 'selected' : '';
+      html += `<div class="queue-chip ${selected}" onclick="toggleQueue('${rg.Number}', '${esc(rg.Name)}', 'ringgroup')">
+        <div class="queue-info">
+          <div class="queue-name">${esc(rg.Name)}</div>
+          <div class="queue-number">Ring Group ${rg.Number}</div>
+        </div>
+      </div>`;
+    }
+
+    container.innerHTML = html || '<div class="empty-state">No queues found on PBX</div>';
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state" style="color:var(--danger)">Failed to load: ${esc(err.message)}</div>`;
+  }
+}
+
+async function toggleQueue(number, name, type) {
+  const existing = monitoredQueues.find(q => q.queue_number === number);
+  if (existing) {
+    await api('/monitored-queues/' + number, { method: 'DELETE' });
+    toast('Removed ' + name);
+  } else {
+    await api('/monitored-queues', {
+      method: 'POST',
+      body: JSON.stringify({ queue_number: number, queue_name: name }),
+    });
+    toast('Added ' + name);
+  }
+  await loadMonitoredQueues();
+  await loadPbxQueues();
+}
+
+// ── Monitored Queues ──
+async function loadMonitoredQueues() {
+  monitoredQueues = await api('/monitored-queues');
+  const container = document.getElementById('monitoredQueueTable');
+
+  if (monitoredQueues.length === 0) {
+    container.innerHTML = '<div class="empty-state">No queues being monitored. Add queues from the list above.</div>';
+    return;
+  }
+
+  let html = `<table>
+    <thead><tr>
+      <th>Queue</th>
+      <th>Enabled</th>
+      <th>Max Wait (s)</th>
+      <th>Min Calls</th>
+      <th>Repeat (s)</th>
+      <th>Play Count</th>
+      <th>Paging Ext</th>
+      <th>Audio File</th>
+      <th>Last Paged</th>
+      <th></th>
+    </tr></thead>
+    <tbody>`;
+
+  for (const q of monitoredQueues) {
+    const wavOptions = wavFiles.map(w =>
+      `<option value="${w.id}" ${q.wav_file_id === w.id ? 'selected' : ''}>${esc(w.original_name)}</option>`
+    ).join('');
+
+    html += `<tr>
+      <td>
+        <strong>${esc(q.queue_name)}</strong><br/>
+        <span class="text-xs text-muted">${q.queue_number}</span>
+      </td>
+      <td>
+        <label class="toggle">
+          <input type="checkbox" ${q.enabled ? 'checked' : ''} onchange="updateQueue('${q.queue_number}', {enabled: this.checked})" />
+          <span class="slider"></span>
+        </label>
+      </td>
+      <td>
+        <input type="number" value="${q.threshold_seconds}" style="width:70px" min="0"
+          title="Page after any caller waits this many seconds"
+          onchange="updateQueue('${q.queue_number}', {threshold_seconds: +this.value})" />
+      </td>
+      <td>
+        <input type="number" value="${q.min_calls || 1}" style="width:60px" min="1"
+          title="Minimum callers in queue before paging triggers"
+          onchange="updateQueue('${q.queue_number}', {min_calls: +this.value})" />
+      </td>
+      <td>
+        <input type="number" value="${q.repeat_interval_seconds || 0}" style="width:70px" min="0"
+          title="Repeat page every N seconds while conditions met (0 = no repeat)"
+          onchange="updateQueue('${q.queue_number}', {repeat_interval_seconds: +this.value})" />
+      </td>
+      <td>
+        <input type="number" value="${q.play_count || 1}" style="width:60px" min="1" max="10"
+          title="Number of times to play the audio announcement (1-10)"
+          onchange="updateQueue('${q.queue_number}', {play_count: +this.value})" />
+      </td>
+      <td>
+        <input type="text" value="${esc(q.paging_extension || '')}" style="width:80px"
+          placeholder="e.g. 599"
+          onchange="updateQueue('${q.queue_number}', {paging_extension: this.value || null})" />
+      </td>
+      <td>
+        <select onchange="updateQueue('${q.queue_number}', {wav_file_id: this.value ? +this.value : null})" style="width:160px">
+          <option value="">-- Default beep --</option>
+          ${wavOptions}
+        </select>
+      </td>
+      <td class="text-xs text-muted">${q.last_paged_at ? new Date(q.last_paged_at + 'Z').toLocaleString() : 'Never'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-outline btn-sm" onclick="testQueuePage('${q.queue_number}')" style="margin-right:6px">Test</button>
+        <button class="btn btn-danger btn-sm" onclick="removeQueue('${q.queue_number}')">Remove</button>
+      </td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+async function updateQueue(number, updates) {
+  await api('/monitored-queues/' + number, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+  toast('Queue updated');
+}
+
+async function removeQueue(number) {
+  if (!confirm('Remove this queue from monitoring?')) return;
+  await api('/monitored-queues/' + number, { method: 'DELETE' });
+  toast('Queue removed');
+  await loadMonitoredQueues();
+}
+
+// ── WAV Files ──
+async function loadWavFiles() {
+  wavFiles = await api('/wav-files');
+  const container = document.getElementById('wavFileList');
+
+  if (wavFiles.length === 0) {
+    container.innerHTML = '<div class="empty-state">No audio files uploaded yet</div>';
+    return;
+  }
+
+  let html = `<table>
+    <thead><tr><th>File</th><th>Duration</th><th>Uploaded</th><th></th></tr></thead>
+    <tbody>`;
+
+  for (const w of wavFiles) {
+    html += `<tr>
+      <td>${esc(w.original_name)}</td>
+      <td>${w.duration_seconds ? w.duration_seconds.toFixed(1) + 's' : '--'}</td>
+      <td class="text-xs text-muted">${new Date(w.uploaded_at).toLocaleString()}</td>
+      <td class="text-right">
+        <button class="btn btn-outline btn-sm" onclick="testPage(${w.id})">Test Page</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteWav(${w.id})">Delete</button>
+      </td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+async function uploadFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/wav-files', { method: 'POST', body: formData });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    toast('File uploaded: ' + file.name);
+    input.value = '';
+    await loadWavFiles();
+    await loadMonitoredQueues(); // refresh dropdown options
+  } catch (err) {
+    toast('Upload failed: ' + err.message, 'error');
+  }
+}
+
+async function deleteWav(id) {
+  if (!confirm('Delete this audio file?')) return;
+  await api('/wav-files/' + id, { method: 'DELETE' });
+  toast('File deleted');
+  await loadWavFiles();
+  await loadMonitoredQueues();
+}
+
+async function testPage(wavFileId) {
+  const ext = document.getElementById('testPageExtension').value.trim();
+  if (!ext) {
+    toast('Enter a test extension number first', 'error');
+    document.getElementById('testPageExtension').focus();
+    return;
+  }
+  try {
+    await api('/test-page', {
+      method: 'POST',
+      body: JSON.stringify({ wav_file_id: wavFileId, paging_extension: ext }),
+    });
+    toast('Test page sent to ' + ext);
+  } catch (err) {
+    toast('Test failed: ' + err.message, 'error');
+  }
+}
+
+async function testQueuePage(queueNumber) {
+  try {
+    await api('/test-page', {
+      method: 'POST',
+      body: JSON.stringify({ queue_number: queueNumber }),
+    });
+    toast('Test page sent for queue ' + queueNumber);
+  } catch (err) {
+    toast('Test failed: ' + err.message, 'error');
+  }
+}
+
+// ── Page Log ──
+async function loadPageLog() {
+  try {
+    const log = await api('/page-log?limit=50');
+    const container = document.getElementById('pageLogTable');
+
+    if (log.length === 0) {
+      container.innerHTML = '<div class="empty-state">No page events yet</div>';
+      return;
+    }
+
+    let html = `<table>
+      <thead><tr><th>Time</th><th>Queue</th><th>Calls</th><th>Longest Wait</th><th>Audio</th><th>Extension</th><th>Result</th></tr></thead>
+      <tbody>`;
+
+    for (const entry of log) {
+      const resultClass = entry.result?.startsWith('SUCCESS') ? 'result-success' : 'result-failed';
+      html += `<tr>
+        <td class="text-xs">${new Date(entry.triggered_at + 'Z').toLocaleString()}</td>
+        <td>${esc(entry.queue_name || entry.queue_number)}<br/><span class="text-xs text-muted">${entry.queue_number}</span></td>
+        <td>${entry.calls_waiting != null ? entry.calls_waiting : '--'}</td>
+        <td>${entry.longest_wait_seconds != null ? entry.longest_wait_seconds + 's' : (entry.caller_waiting_seconds != null ? entry.caller_waiting_seconds + 's' : '--')}</td>
+        <td class="text-xs">${esc(entry.wav_file || 'default')}</td>
+        <td>${entry.paging_extension || '--'}</td>
+        <td class="${resultClass} text-sm">${esc(entry.result || '')}</td>
+      </tr>`;
+    }
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    // Also update recent pages on dashboard
+    const recentContainer = document.getElementById('recentPages');
+    if (log.length > 0) {
+      recentContainer.innerHTML = container.innerHTML;
+    }
+  } catch (err) {
+    console.error('Log load error:', err);
+  }
+}
+
+// ── Helpers ──
+function esc(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ── Init ──
+async function init() {
+  await loadSettings();
+  await loadWavFiles();
+  await loadMonitoredQueues();
+  await loadStatus();
+  await loadPageLog();
+
+  // Auto-refresh status every 5 seconds
+  setInterval(loadStatus, 5000);
+  // Refresh log every 15 seconds
+  setInterval(loadPageLog, 15000);
+}
+
+init();
+</script>
+</body>
+</html>
