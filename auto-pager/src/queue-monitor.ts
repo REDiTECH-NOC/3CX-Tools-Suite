@@ -144,7 +144,7 @@ export class QueueMonitor extends EventEmitter {
           });
 
           // Update tracked calls from relay's queued calls (for getStatus())
-          for (const rc of rq.queuedCalls) {
+          for (const rc of (rq.queuedCalls ?? [])) {
             if (!this.trackedCalls.has(rc.id)) {
               this.trackedCalls.set(rc.id, {
                 callId: rc.id,
@@ -155,7 +155,7 @@ export class QueueMonitor extends EventEmitter {
             }
           }
           // Remove tracked calls that are no longer in relay data for this queue
-          const relayCallIds = new Set(rq.queuedCalls.map(c => c.id));
+          const relayCallIds = new Set((rq.queuedCalls ?? []).map(c => c.id));
           for (const [callId, tc] of this.trackedCalls) {
             if (tc.queueNumber === rq.number && !relayCallIds.has(callId)) {
               this.trackedCalls.delete(callId);
@@ -214,7 +214,7 @@ export class QueueMonitor extends EventEmitter {
         if (!queueNumber) continue;
 
         // Skip connected calls — only count those still waiting
-        if (this.isCallConnected(call)) continue;
+        if (this.isCallConnected(call, queueMap)) continue;
 
         seenCallIds.add(call.Id);
 
@@ -353,16 +353,23 @@ export class QueueMonitor extends EventEmitter {
     return null;
   }
 
-  /** Check if a call has been answered/connected to an agent. */
-  private isCallConnected(call: ThreecxActiveCall): boolean {
-    // Do NOT use EstablishedAt — 3CX sets it when the call enters the queue,
-    // not when an agent answers. Use Status instead.
+  /**
+   * Check if a call has been answered/connected to an agent.
+   * IMPORTANT: "Talking" to a queue number means the caller is hearing
+   * hold music — NOT that an agent answered. Must check the Callee.
+   */
+  private isCallConnected(call: ThreecxActiveCall, queueMap: Map<string, MonitoredQueue>): boolean {
     const status = call.Status?.toLowerCase() || '';
 
-    // "Talking" or "Connected" means an agent has answered
-    if (status === 'talking' || status === 'connected') return true;
+    if (status === 'talking' || status === 'connected') {
+      // If the Callee IS a queue number (or starts with one), this is
+      // a caller hearing hold music — not an answered call
+      const calleeExt = call.Callee?.split(' ')[0] ?? '';
+      if (queueMap.has(calleeExt)) return false;
+      if (queueMap.has(call.Callee)) return false;
+      return true;
+    }
 
-    // "Rerouting", "Ringing", "Dialing", "Queued" = still waiting
     if (call.Segments) {
       for (const seg of call.Segments) {
         const segStatus = seg.Status?.toLowerCase() || '';

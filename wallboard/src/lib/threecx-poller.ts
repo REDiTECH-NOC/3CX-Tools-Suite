@@ -527,6 +527,27 @@ class ThreecxPoller {
           }
         }
 
+        // Manager data — still fetch in relay mode (relay doesn't track managers)
+        const needManagerFetchRelay = now.getTime() - this._lastManagerFetchTime > MANAGER_FETCH_INTERVAL_MS;
+        if (needManagerFetchRelay && this.client) {
+          this._lastManagerFetchTime = now.getTime();
+          try {
+            const password = decrypt(config.encryptedPassword);
+            this.managerClient = new ThreecxClient(config.pbxUrl, config.extensionNumber, password);
+            const managerResults = await Promise.all(
+              visibleQueues.map((q) => this.managerClient!.getQueueWithManagers(q.queueId)),
+            );
+            this._cachedManagersByQueue.clear();
+            for (let i = 0; i < visibleQueues.length; i++) {
+              const expanded = managerResults[i] as { Managers?: ThreecxQueueManager[] };
+              const managers = expanded?.Managers ?? [];
+              this._cachedManagersByQueue.set(visibleQueues[i].queueId, managers);
+            }
+          } catch (err) {
+            console.warn('[ThreecxPoller] Manager fetch in relay mode failed (non-fatal):', err instanceof Error ? err.message : String(err));
+          }
+        }
+
         // Build queue data from relay payload
         const relayQueueMap = new Map(relayPayload.queues.map((rq) => [rq.number, rq]));
 
@@ -610,7 +631,9 @@ class ThreecxPoller {
             ? Math.round(parseIsoDuration(fullDayStats.AvgRingTime))
             : 0;
 
-          // Agent statuses from relay
+          // Agent statuses from relay (enrich with cached manager data)
+          const cachedManagers = this._cachedManagersByQueue.get(vq.queueId) ?? [];
+          const managerExtSet = new Set(cachedManagers.map((m) => m.Number));
           const agentStatuses: QueueAgentStatus[] = rq.agents.map((ra) => ({
             extensionNumber: ra.ext,
             displayName: ra.name,
@@ -618,7 +641,7 @@ class ThreecxPoller {
             callState: ra.callState,
             profileName: ra.profileName,
             isRegistered: ra.isRegistered,
-            isManager: false, // relay doesn't track managers — use cached if available
+            isManager: managerExtSet.has(ra.ext),
           }));
 
           const agentsLoggedIn = rq.agents.filter((a) => a.loggedIn).length;

@@ -187,22 +187,55 @@ function getMidnightInTimezone(tz: string, now: Date): Date {
   return new Date(Date.UTC(y, m - 1, d, -offsetHours, 0, 0));
 }
 
+/**
+ * Extract extension number from formatted 3CX fields.
+ * "1002 tools, admin" → "1002", "8003 - Queue 1" → "8003"
+ */
+function extractExt(field: string): string {
+  return field.split(' ')[0];
+}
+
+/**
+ * Fuzzy match: does this field reference the given queue number?
+ * Handles exact match, extracted extension, space-separated, and suffix patterns.
+ */
+function calleeContainsQueue(field: string, queueNumber: string): boolean {
+  if (!field) return false;
+  return field === queueNumber
+    || extractExt(field) === queueNumber
+    || field.includes(` ${queueNumber}`)
+    || field.endsWith(queueNumber);
+}
+
 function deriveCallState(
   ext: string,
   activeCalls: ActiveCall[],
-  user: PbxUser | undefined
+  user: PbxUser | undefined,
+  allQueueNumbers: Set<string>
 ): 'available' | 'talking' | 'ringing' | 'offline' {
   if (!user?.IsRegistered) return 'offline';
 
   for (const call of activeCalls) {
-    if (call.Caller === ext || call.Callee === ext) {
+    const callerExt = extractExt(call.Caller || '');
+    const calleeExt = extractExt(call.Callee || '');
+
+    if (callerExt === ext || calleeExt === ext) {
       const status = (call.Status || '').toLowerCase();
+
+      // "Talking" to a queue number means the caller is hearing hold music,
+      // not that an agent is talking. Don't count as 'talking' for the agent.
+      if (calleeExt === ext && allQueueNumbers.has(callerExt)) continue;
+      if (callerExt === ext && allQueueNumbers.has(calleeExt)) continue;
+
       if (status.includes('talking') || status.includes('connected')) return 'talking';
       if (status.includes('ringing') || status.includes('routing')) return 'ringing';
     }
+
     if (call.Segments) {
       for (const seg of call.Segments) {
-        if (seg.Dn === ext || seg.DialedDn === ext || seg.CallerNumber === ext || seg.CalleeNumber === ext) {
+        const segFields = [seg.Dn, seg.DialedDn, seg.CallerNumber, seg.CalleeNumber];
+        const matchesExt = segFields.some(f => f != null && extractExt(f) === ext);
+        if (matchesExt) {
           const segStatus = (seg.Status || '').toLowerCase();
           if (segStatus.includes('talking') || segStatus.includes('connected')) return 'talking';
           if (segStatus.includes('ringing') || segStatus.includes('routing')) return 'ringing';
@@ -214,31 +247,60 @@ function deriveCallState(
   return 'available';
 }
 
+/**
+ * Detect calls waiting in a queue from ActiveCalls.
+ * Ported from wallboard's proven 3-method detection logic.
+ *
+ * Method 1: "Talking"/"Connected" to queue itself = still waiting (hold music)
+ * Method 2: Callee or segment fields reference queue (routing/ringing/transferring)
+ * Method 3: "Routing" to a known queue agent with no segments = early ring phase
+ */
 function computeQueuedCalls(
   queueNumber: string,
   activeCalls: ActiveCall[],
-  serverNow: Date
+  serverNow: Date,
+  allAgentExts: Set<string>
 ): { queuedCalls: RelayQueuedCall[]; callsWaiting: number; longestWaitSec: number } {
   const queuedCalls: RelayQueuedCall[] = [];
   let longestWaitSec = 0;
 
-  for (const call of activeCalls) {
-    const status = (call.Status || '').toLowerCase();
-    const isWaiting = status.includes('routing') || status.includes('transferring');
-    const targetsQueue = call.Callee === queueNumber;
+  const matchesQueue = (field: string | undefined): boolean =>
+    field != null && calleeContainsQueue(field, queueNumber);
 
-    if (!isWaiting || !targetsQueue) {
-      if (call.Segments) {
-        const queueSeg = call.Segments.find(
-          s => s.DialedDn === queueNumber || s.CalleeNumber === queueNumber
-        );
-        if (!queueSeg) continue;
-        const segStatus = (queueSeg.Status || '').toLowerCase();
-        if (!segStatus.includes('routing') && !segStatus.includes('transferring') && !segStatus.includes('ringing')) continue;
-      } else {
-        continue;
-      }
+  for (const call of activeCalls) {
+    const topStatus = (call.Status || '').toLowerCase();
+    const isTalkingOrConnected = topStatus.includes('talking') || topStatus.includes('connected');
+
+    let isQueued = false;
+
+    // Method 1: "Talking"/"Connected" to the queue itself = still waiting (hold music)
+    if (isTalkingOrConnected && matchesQueue(call.Callee)) {
+      isQueued = true;
     }
+    // If talking/connected but NOT to queue → agent answered → skip
+    else if (isTalkingOrConnected) {
+      isQueued = false;
+    }
+    // Method 2a: Callee directly references queue (routing/ringing/transferring)
+    else if (matchesQueue(call.Callee)) {
+      isQueued = true;
+    }
+    // Method 2b: Any segment field references queue
+    else if (call.Segments) {
+      const hasQueueRef = call.Segments.some(seg =>
+        [seg.CallerNumber, seg.CalleeNumber, seg.DialedDn, seg.Dn]
+          .some(f => matchesQueue(f))
+      );
+      if (hasQueueRef) isQueued = true;
+    }
+
+    // Method 3: "Routing" to a known queue agent with no segments = early ring phase
+    if (!isQueued && (!call.Segments || call.Segments.length === 0) && topStatus.includes('routing')) {
+      const calleeExt = extractExt(call.Callee || '');
+      if (allAgentExts.has(calleeExt)) isQueued = true;
+    }
+
+    if (!isQueued) continue;
 
     let waitSec = 0;
     const changeTime = call.LastChangeStatus || call.EstablishedAt;
@@ -273,15 +335,10 @@ async function fastPoll(): Promise<void> {
     // FAST: Only fetch active calls every cycle
     const activeCalls = await collector.getActiveCalls();
 
-    // DEBUG: Log raw ActiveCalls when there are any (helps diagnose queue matching)
-    if (activeCalls.length > 0 && (config.logLevel === 'debug' || _fastPollCount % 40 === 0)) {
+    // Debug logging for active calls (only in debug mode)
+    if (config.logLevel === 'debug' && activeCalls.length > 0) {
       for (const call of activeCalls) {
         console.log(`[DEBUG] ActiveCall id=${call.Id} caller=${call.Caller} callee=${call.Callee} status=${call.Status} segments=${call.Segments?.length ?? 0}`);
-        if (call.Segments) {
-          for (const seg of call.Segments) {
-            console.log(`[DEBUG]   Seg dn=${seg.Dn} dialedDn=${seg.DialedDn} callerNum=${seg.CallerNumber} calleeNum=${seg.CalleeNumber} status=${seg.Status}`);
-          }
-        }
       }
     }
 
@@ -292,13 +349,22 @@ async function fastPoll(): Promise<void> {
     // Build per-queue data using cached slow data + fresh active calls
     const relayQueues: RelayQueueData[] = [];
 
+    // Precompute queue number set (for deriveCallState to ignore queue-waiting calls)
+    const allQueueNumbers = new Set(cachedQueues.map(q => q.Number));
+
+    // Precompute all agent extensions across all queues (for Method 3 detection)
+    const allAgentExts = new Set<string>();
+    for (const exts of queueAgentCache.values()) {
+      for (const ext of exts) allAgentExts.add(ext);
+    }
+
     for (const queue of cachedQueues) {
       const agentExts = queueAgentCache.get(queue.Id) ?? [];
 
       const agents: RelayAgentData[] = [];
       for (const ext of agentExts) {
         const user = cachedUserMap.get(ext);
-        const callState = deriveCallState(ext, activeCalls, user);
+        const callState = deriveCallState(ext, activeCalls, user, allQueueNumbers);
         const wsLoggedIn = monitor.isAgentLoggedIn(queue.Number, ext);
         // WebSocket monitor is authoritative for per-queue login status.
         // Fallback to REST API QueueStatus (global — logged into ANY queue = "LoggedIn").
@@ -316,7 +382,7 @@ async function fastPoll(): Promise<void> {
       }
 
       const { queuedCalls, callsWaiting, longestWaitSec } = computeQueuedCalls(
-        queue.Number, activeCalls, serverNow
+        queue.Number, activeCalls, serverNow, allAgentExts
       );
 
       relayQueues.push({
