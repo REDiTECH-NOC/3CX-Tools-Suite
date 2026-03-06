@@ -259,6 +259,7 @@
     .text-muted { color: var(--text-muted); }
     .text-right { text-align: right; }
     .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+    .hidden { display: none !important; }
 
     /* ── Login screen ── */
     .login-overlay {
@@ -307,9 +308,13 @@
   <div class="login-overlay" id="loginOverlay">
     <div class="login-box">
       <h1>3CX Auto-Pager</h1>
-      <p class="subtitle">Sign in with your 3CX extension</p>
+      <p class="subtitle" id="loginSubtitle">Sign in with your 3CX extension</p>
       <form onsubmit="handleLogin(event)">
-        <div class="form-group">
+        <div class="form-group hidden" id="login-pbx-url-group">
+          <label>PBX URL</label>
+          <input type="text" id="login-pbx-url" placeholder="pbx.example.com" autocomplete="url" />
+        </div>
+        <div class="form-group" style="margin-top:12px">
           <label>Extension</label>
           <input type="text" id="login-extension" placeholder="e.g. 0009" autocomplete="username" />
         </div>
@@ -548,31 +553,38 @@ function showApp(extension) {
 
 async function handleLogin(e) {
   e.preventDefault();
+  const pbxUrl = document.getElementById('login-pbx-url').value.trim();
   const ext = document.getElementById('login-extension').value.trim();
   const pwd = document.getElementById('login-password').value;
   const errEl = document.getElementById('loginError');
   const btn = document.getElementById('loginBtn');
+  const needsPbxUrl = !document.getElementById('login-pbx-url-group').classList.contains('hidden');
 
+  if (needsPbxUrl && !pbxUrl) {
+    errEl.textContent = 'Enter the PBX URL';
+    return;
+  }
   if (!ext || !pwd) {
     errEl.textContent = 'Enter extension and password';
     return;
   }
 
-  btn.textContent = 'Signing in...';
+  const label = needsPbxUrl ? 'Connecting...' : 'Signing in...';
+  btn.textContent = label;
   btn.disabled = true;
   errEl.textContent = '';
 
   try {
     const res = await api('/login', {
       method: 'POST',
-      body: JSON.stringify({ extension: ext, password: pwd }),
+      body: JSON.stringify({ extension: ext, password: pwd, pbx_url: pbxUrl || undefined }),
     });
     showApp(res.extension);
     initApp();
   } catch (err) {
     errEl.textContent = err.message;
   } finally {
-    btn.textContent = 'Sign In';
+    btn.textContent = needsPbxUrl ? 'Connect & Sign In' : 'Sign In';
     btn.disabled = false;
   }
 }
@@ -589,9 +601,25 @@ async function checkSession() {
       showApp(res.extension);
       initApp();
     } else {
+      // Show/hide PBX URL field based on whether it's already configured
+      const pbxGroup = document.getElementById('login-pbx-url-group');
+      const subtitle = document.getElementById('loginSubtitle');
+      const loginBtn = document.getElementById('loginBtn');
+      if (res.pbxConfigured) {
+        pbxGroup.classList.add('hidden');
+        subtitle.textContent = 'Sign in with your 3CX extension';
+        loginBtn.textContent = 'Sign In';
+      } else {
+        pbxGroup.classList.remove('hidden');
+        subtitle.textContent = 'Initial setup — connect to your 3CX PBX';
+        loginBtn.textContent = 'Connect & Sign In';
+      }
       showLogin();
     }
   } catch {
+    document.getElementById('login-pbx-url-group').classList.remove('hidden');
+    document.getElementById('loginSubtitle').textContent = 'Initial setup — connect to your 3CX PBX';
+    document.getElementById('loginBtn').textContent = 'Connect & Sign In';
     showLogin();
   }
 }

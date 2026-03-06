@@ -146,7 +146,7 @@ export function createApiRouter(deps: {
   // ── Auth ──
 
   router.post('/login', async (req: Request, res: Response) => {
-    const { extension, password } = req.body as { extension?: string; password?: string };
+    const { extension, password, pbx_url } = req.body as { extension?: string; password?: string; pbx_url?: string };
 
     if (!extension || !password) {
       res.status(400).json({ error: 'Extension and password required' });
@@ -159,10 +159,16 @@ export function createApiRouter(deps: {
       return;
     }
 
-    // Authenticate against 3CX — use stored PBX URL or try the one provided
-    const pbxUrl = getSetting('pbx_url');
+    // Use provided PBX URL (first-time setup) or fall back to stored one
+    let pbxUrl = getSetting('pbx_url');
+    if (pbx_url) {
+      // Normalize: strip protocol if provided, store just the FQDN
+      const fqdn = pbx_url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      pbxUrl = `https://${fqdn}`;
+    }
+
     if (!pbxUrl) {
-      res.status(503).json({ error: '3CX not configured — set PBX URL in settings first' });
+      res.status(400).json({ error: 'PBX URL is required for initial setup' });
       return;
     }
 
@@ -172,6 +178,13 @@ export function createApiRouter(deps: {
     if (!result.success) {
       res.status(401).json({ error: 'Authentication failed: ' + (result.error || 'invalid credentials') });
       return;
+    }
+
+    // Save PBX connection on first-time setup
+    if (pbx_url) {
+      setSetting('pbx_url', pbxUrl);
+      setSetting('pbx_extension', extension);
+      setSetting('pbx_password', password);
     }
 
     // Create session
@@ -192,10 +205,11 @@ export function createApiRouter(deps: {
     const cookies = parseCookies(req.headers.cookie);
     const token = cookies[CONFIG.sessionCookie];
     const session = token ? getSession(token) : null;
+    const pbxConfigured = !!getSetting('pbx_url');
     if (session) {
-      res.json({ authenticated: true, extension: session.extension });
+      res.json({ authenticated: true, extension: session.extension, pbxConfigured });
     } else {
-      res.json({ authenticated: false });
+      res.json({ authenticated: false, pbxConfigured });
     }
   });
 
