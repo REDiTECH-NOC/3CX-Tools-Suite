@@ -39,8 +39,8 @@ export function setRelayData(payload: RelayPushPayload, ip?: string): void {
   _data = payload;
   _receivedAt = Date.now();
   if (ip) _relayIp = ip;
-  // Fresh relay data supersedes optimistic overrides
-  clearAgentOverrides();
+  // Clear overrides only when relay data confirms the change
+  pruneConfirmedOverrides(payload);
   _emitter.emit('data', payload);
 }
 
@@ -112,7 +112,29 @@ export function getAgentOverride(queueNumber: string, ext: string): boolean | un
   return o?.loggedIn;
 }
 
-/** Clear all overrides (called when fresh relay data arrives). */
+/** Clear all overrides. */
 export function clearAgentOverrides(): void {
   _agentOverrides.length = 0;
+}
+
+/**
+ * Remove overrides that the relay data has confirmed (agent status matches override).
+ * Keeps overrides alive until the relay actually reflects the change.
+ */
+function pruneConfirmedOverrides(payload: RelayPushPayload): void {
+  const now = Date.now();
+  for (let i = _agentOverrides.length - 1; i >= 0; i--) {
+    const o = _agentOverrides[i];
+    // Expired — remove regardless
+    if (o.expiresAt < now) { _agentOverrides.splice(i, 1); continue; }
+    // Check if relay data now matches the override
+    const queue = payload.queues.find(q => q.number === o.queueNumber);
+    if (queue) {
+      const agent = queue.agents.find(a => a.ext === o.ext);
+      if (agent && agent.loggedIn === o.loggedIn) {
+        // Relay confirmed the change — override no longer needed
+        _agentOverrides.splice(i, 1);
+      }
+    }
+  }
 }

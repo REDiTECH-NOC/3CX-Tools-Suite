@@ -259,16 +259,16 @@ class ThreecxPoller {
    */
   forcePoll(): void {
     if (!this.running) return;
-    // Force a full monitor reconnect for fresh per-queue status
-    if (this.queueMonitor) {
+    // In relay mode, optimistic overrides persist until relay confirms the change,
+    // so we just need to trigger an immediate poll to read the override.
+    // In polling mode, force the queue monitor to reconnect for fresh per-queue status.
+    if (!this._lastRelayMode && this.queueMonitor) {
       this.queueMonitor.forceReconnect();
     }
-    // Delay to let the monitor fully reconnect (REST login + session + WS + data)
-    setTimeout(() => {
-      if (!this.polling) {
-        void this.poll();
-      }
-    }, 4000);
+    // Trigger immediate poll (no delay needed — overrides are persistent)
+    if (!this.polling) {
+      void this.poll();
+    }
   }
 
   // ─── Interval Management ────────────────────────────────────────
