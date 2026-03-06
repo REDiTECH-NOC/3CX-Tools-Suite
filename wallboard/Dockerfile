@@ -33,4 +33,4 @@ USER nextjs
 EXPOSE 3000 3100
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
-CMD ["sh", "-c", "node node_modules/prisma/build/index.js db push --accept-data-loss && node server.js"]
+CMD ["sh", "-c", "ENCODED_PW=$(echo -n \"$POSTGRES_PASSWORD\" | sed 's/#/%23/g; s/@/%40/g; s/:/%3A/g') && export DATABASE_URL=\"postgresql://${POSTGRES_USER}:${ENCODED_PW}@${POSTGRES_HOST:-db}:5432/${POSTGRES_DB}\" && node node_modules/prisma/build/index.js db push --accept-data-loss && node server.js"]
