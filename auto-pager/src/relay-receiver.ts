@@ -6,7 +6,22 @@
  */
 
 import { createHash } from 'crypto';
+import { EventEmitter } from 'events';
 import { getSetting, setSetting } from './db';
+
+// ─── Event emitter for real-time relay push notifications ────
+const _emitter = new EventEmitter();
+_emitter.setMaxListeners(20);
+
+/** Subscribe to relay data pushes. Fires immediately when new data arrives. */
+export function onRelayPush(callback: (payload: RelayPushPayload) => void): void {
+  _emitter.on('push', callback);
+}
+
+/** Unsubscribe from relay data pushes. */
+export function offRelayPush(callback: (payload: RelayPushPayload) => void): void {
+  _emitter.off('push', callback);
+}
 
 // ─── Types (matches relay-agent payload) ─────────────────────
 
@@ -73,6 +88,7 @@ export function setRelayData(payload: RelayPushPayload, ip?: string): void {
   _data = payload;
   _receivedAt = Date.now();
   _relayIp = ip ?? null;
+  _emitter.emit('push', payload);
 }
 
 export function getRelayData(): RelayPushPayload | null {

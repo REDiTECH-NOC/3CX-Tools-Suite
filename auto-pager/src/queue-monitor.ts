@@ -14,7 +14,7 @@ import {
   WavFile,
   getDb,
 } from './db';
-import { isRelayFresh, getRelayData, type RelayQueueData } from './relay-receiver';
+import { isRelayFresh, getRelayData, onRelayPush, offRelayPush, type RelayQueueData, type RelayPushPayload } from './relay-receiver';
 
 export interface PageEvent {
   queueNumber: string;
@@ -46,6 +46,8 @@ export class QueueMonitor extends EventEmitter {
   private running = false;
   private pollCount = 0;
   private _lastRelayMode = false;
+  private _relayHandler: ((payload: RelayPushPayload) => void) | null = null;
+  private _relayPollInProgress = false;
 
   constructor(client: ThreecxClient) {
     super();
@@ -59,7 +61,19 @@ export class QueueMonitor extends EventEmitter {
     const intervalMs = parseInt(getSetting('poll_interval_ms') || '5000', 10);
     console.log(`[QueueMonitor] Starting — poll every ${intervalMs}ms`);
 
-    // Run immediately, then on interval
+    // Subscribe to relay pushes for real-time evaluation
+    this._relayHandler = () => {
+      if (!this.running || this._relayPollInProgress) return;
+      const relayEnabled = getSetting('relay_enabled') === 'true';
+      if (!relayEnabled || !isRelayFresh()) return;
+      this._relayPollInProgress = true;
+      this.poll()
+        .catch((err) => console.error('[QueueMonitor] Relay-triggered poll error:', err))
+        .finally(() => { this._relayPollInProgress = false; });
+    };
+    onRelayPush(this._relayHandler);
+
+    // Run immediately, then on interval (fallback for polling mode)
     this.poll().catch((err) =>
       console.error('[QueueMonitor] Initial poll error:', err),
     );
@@ -75,6 +89,10 @@ export class QueueMonitor extends EventEmitter {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (this._relayHandler) {
+      offRelayPush(this._relayHandler);
+      this._relayHandler = null;
     }
     this.trackedCalls.clear();
     this.queuePagingState.clear();
