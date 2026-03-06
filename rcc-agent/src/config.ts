@@ -5,7 +5,7 @@ export const config = {
   apiBaseUrl: process.env.RCC_API_URL!,
   apiKey: process.env.RCC_AGENT_API_KEY!,
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "5000", 10),
-  agentVersion: "1.0.0",
+  agentVersion: "1.2.0",
 };
 
 // Validate required env vars on startup

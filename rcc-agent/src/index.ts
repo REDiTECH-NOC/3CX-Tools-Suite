@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import { pollForTask, reportResult, sendHeartbeat } from "./api-client.js";
 import { deploySsoFiles, removeSsoFiles, deploy3cxTools, remove3cxTools } from "./ssh-deployer.js";
+import { startTerminalClient } from "./ssh-terminal.js";
 import { log } from "./logger.js";
 import type { AgentTask } from "./api-client.js";
 
@@ -81,6 +82,9 @@ async function main(): Promise<void> {
     log.error("Check RCC_API_URL and RCC_AGENT_API_KEY in your .env file");
     process.exit(1);
   }
+
+  // Connect outbound to RCC terminal broker (no inbound ports needed)
+  startTerminalClient();
 
   // Start polling loop
   setInterval(poll, config.pollIntervalMs);
