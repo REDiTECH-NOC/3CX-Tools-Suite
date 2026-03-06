@@ -368,21 +368,43 @@ export class QueueMonitor {
   }
 
   private sendLogin(token: string, sessionKey: string): void {
-    // MessageId 100 = Login, sent via HTTP POST
-    const loginPayload = varintField(2, 1)
-      .concat(stringField(3, `Bearer ${token}`))
-      .concat(stringField(5, sessionKey));
-    const loginMsg = buildMsg(100, loginPayload);
+    // Send Login (100) then GetMyInfo (102) via HTTP POST.
+    // Server pushes QueuesInfo (211) via WebSocket in response.
+    this.sendHttpCommand(sessionKey, 100)
+      .then(() => this.sendHttpCommand(sessionKey, 102))
+      .catch((err) => {
+        console.error('[Monitor] HTTP login/setup error:', err instanceof Error ? err.message : String(err));
+      });
+  }
 
-    const body = loginMsg;
-    const req = https.request(`https://${this.pbxHost}/MyPhone/MPWebService.asmx`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': body.length },
-      rejectUnauthorized: false,
+  private sendHttpCommand(sessionKey: string, messageId: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const msg = buildMsg(messageId, []);
+      const req = https.request(`https://${this.pbxHost}/MyPhone/MPWebService.asmx`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          Accept: 'application/octet-stream',
+          'Content-Length': msg.length,
+          MyPhoneSession: sessionKey,
+        },
+        rejectUnauthorized: false,
+      }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks);
+          if (res.statusCode === 200 && raw.length > 0) {
+            this.handleBinaryMessage(raw);
+          }
+          resolve();
+        });
+      });
+      req.on('error', (err) => reject(err));
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error(`HTTP command ${messageId} timeout`)); });
+      req.write(msg);
+      req.end();
     });
-    req.on('error', () => {});
-    req.write(body);
-    req.end();
   }
 
   private handleBinaryMessage(payload: Buffer): void {
