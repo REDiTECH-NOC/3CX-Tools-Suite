@@ -1135,10 +1135,10 @@ async function initApp() {
   await loadPageLog();
   await loadRelayStatus();
 
-  // Auto-refresh status every 5 seconds
-  setInterval(loadStatus, 5000);
-  // Refresh relay status every 10 seconds
-  setInterval(loadRelayStatus, 10000);
+  // Auto-refresh status every 1 second (real-time when relay connected)
+  setInterval(loadStatus, 1000);
+  // Refresh relay status every 5 seconds
+  setInterval(loadRelayStatus, 5000);
   // Refresh log every 15 seconds
   setInterval(loadPageLog, 15000);
 }

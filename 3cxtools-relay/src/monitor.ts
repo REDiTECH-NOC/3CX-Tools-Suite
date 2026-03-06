@@ -216,7 +216,7 @@ export class QueueMonitor {
       this.currentSessionKey = session.sessionKey;
       await this.connectWebSocket(session.sessionKey, session.pass, token);
 
-      // Start periodic refresh — re-request QueuesInfo every 15s
+      // Start periodic refresh — re-request QueuesInfo every 3s
       // The PBX doesn't push updates for REST API-initiated login/logout changes,
       // so we need to actively poll for fresh queue data.
       this.startPeriodicRefresh(session.sessionKey);
@@ -424,9 +424,9 @@ export class QueueMonitor {
     const refresh = () => {
       if (this.stopped || !this.connected) return;
       this.sendHttpCommand(sessionKey, 102).catch(() => {});
-      this.refreshTimer = setTimeout(refresh, 15_000);
+      this.refreshTimer = setTimeout(refresh, 3_000);
     };
-    this.refreshTimer = setTimeout(refresh, 15_000);
+    this.refreshTimer = setTimeout(refresh, 3_000);
   }
 
   private handleBinaryMessage(payload: Buffer): void {
