@@ -16,6 +16,8 @@ cp -r "$TMP_DIR/rcc-agent/src" "$INSTALL_DIR/"
 cp "$TMP_DIR/rcc-agent/package.json" "$INSTALL_DIR/"
 cp "$TMP_DIR/rcc-agent/tsconfig.json" "$INSTALL_DIR/"
 cp "$TMP_DIR/rcc-agent/update.sh" "$INSTALL_DIR/"
+cp "$TMP_DIR/rcc-agent/.env.example" "$INSTALL_DIR/" 2>/dev/null || true
+cp "$TMP_DIR/rcc-agent/systemd/relay-agent.service" "$INSTALL_DIR/systemd/" 2>/dev/null || true
 
 echo "[Update] Installing dependencies..."
 cd "$INSTALL_DIR"
